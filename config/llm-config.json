@@ -1,0 +1,97 @@
+{
+  "llms": [
+    {
+      "name": "qwen",
+      "type": "local",
+      "priority": 1,
+      "model": "qwen2.5-coder:7b",
+      "endpoint": "http://localhost:8000",
+      "cost": 0,
+      "speed": "fast",
+      "schedule": "always",
+      "resourceLimits": {
+        "maxCpuPercent": 70,
+        "maxRamGB": 8
+      }
+    },
+    {
+      "name": "deepseek",
+      "type": "ollama",
+      "priority": 2,
+      "model": "deepseek-coder:6.7b",
+      "endpoint": "http://localhost:11434",
+      "cost": 0,
+      "speed": "medium",
+      "schedule": {
+        "daytime": false,
+        "allowed": [{"start": "22:00", "end": "06:00"}]
+      },
+      "resourceLimits": {
+        "maxCpuPercent": 80,
+        "maxRamGB": 12
+      }
+    },
+    {
+      "name": "codellama",
+      "type": "ollama",
+      "priority": 3,
+      "model": "codellama:13b",
+      "endpoint": "http://localhost:11434",
+      "cost": 0,
+      "speed": "slow",
+      "schedule": {
+        "allowed": [{"start": "22:00", "end": "06:00"}]
+      },
+      "resourceLimits": {
+        "maxCpuPercent": 90,
+        "maxRamGB": 16
+      }
+    }
+  ],
+  "vision": {
+    "models": [
+      {
+        "name": "llava",
+        "type": "ollama",
+        "model": "llava:13b",
+        "endpoint": "http://localhost:11434",
+        "cost": 0,
+        "useCase": "screenshot-analysis",
+        "schedule": {
+          "allowed": [{"start": "22:00", "end": "06:00"}]
+        }
+      },
+      {
+        "name": "tesseract",
+        "type": "ocr",
+        "model": "tesseract",
+        "cost": 0,
+        "useCase": "text-extraction",
+        "schedule": "always"
+      }
+    ],
+    "strategy": {
+      "default": "accessibility-tree",
+      "fallback": "tesseract-ocr",
+      "nighttime": "llava",
+      "onlyWhenStuck": true
+    }
+  },
+  "fallbackChain": {
+    "daytime": ["qwen"],
+    "nighttime": ["qwen", "deepseek", "codellama"]
+  },
+  "optimization": {
+    "cache": {
+      "enabled": true,
+      "aggressive": true,
+      "ttl": 86400,
+      "maxSize": "500MB"
+    },
+    "batching": {
+      "enabled": true,
+      "maxBatchSize": 5
+    },
+    "promptCompression": true
+  }
+}

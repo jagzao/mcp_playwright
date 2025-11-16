@@ -1,0 +1,60 @@
+# Dependencies
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Data (sensitive)
+data/sessions/
+data/checkpoints/
+data/agent-memory/
+backups/
+*.enc
+
+# Recordings (keep structure, ignore content)
+recordings/manual/*.spec.ts
+recordings/agent-generated/*.spec.ts
+
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+coverage/
+
+# Temporary files
+*.tmp
+temp/
+.cache/
+
+# Videos and screenshots (too large)
+data/videos/*.mp4
+data/screenshots/*.png
+data/traces/*.zip

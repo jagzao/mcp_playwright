@@ -1,0 +1,90 @@
+{
+  "agent": {
+    "name": "WebAgent",
+    "version": "1.0.0",
+    "observation": {
+      "defaultMethod": "accessibility",
+      "fallbackToVision": true,
+      "visionOnError": true,
+      "screenshotQuality": 80
+    },
+    "reasoning": {
+      "llm": "qwen",
+      "temperature": 0.1,
+      "maxThinkingTime": 10000,
+      "explainActions": true
+    },
+    "execution": {
+      "headless": false,
+      "slowMo": 100,
+      "humanBehavior": true,
+      "maxStepsPerTask": 50,
+      "timeout": 30000
+    },
+    "selfHealing": {
+      "enabled": true,
+      "maxRetries": 3,
+      "retryStrategies": [
+        "alternative_selector",
+        "wait_longer",
+        "use_vision",
+        "ask_llm"
+      ]
+    },
+    "memory": {
+      "enabled": true,
+      "rememberFailures": true,
+      "rememberSuccesses": true,
+      "contextWindow": 20
+    },
+    "recording": {
+      "autoGenerate": true,
+      "saveVideo": "on-error",
+      "saveScreenshots": true,
+      "saveTrace": "on-error"
+    }
+  },
+  "antiDetection": {
+    "enabled": true,
+    "humanBehavior": {
+      "typingSpeed": {
+        "min": 50,
+        "max": 150
+      },
+      "mouseMovements": {
+        "enabled": true,
+        "randomness": 0.3
+      },
+      "scrollBehavior": "human",
+      "readingPauses": true
+    },
+    "rateLimit": {
+      "linkedin.com": {
+        "maxActionsPerHour": 10,
+        "delayBetweenActions": "5-15s",
+        "randomizeOrder": true
+      },
+      "amazon.com": {
+        "maxActionsPerHour": 20,
+        "delayBetweenActions": "3-8s"
+      },
+      "default": {
+        "maxActionsPerHour": 30,
+        "delayBetweenActions": "2-5s"
+      }
+    },
+    "fingerprint": {
+      "userAgent": "auto-rotate",
+      "timezone": "auto",
+      "locale": "es-MX",
+      "webgl": "randomize",
+      "canvas": "randomize"
+    },
+    "stealth": {
+      "hideAutomation": true,
+      "hideHeadless": true,
+      "perfectCanvas": true,
+      "perfectWebGL": true
+    }
+  }
+}

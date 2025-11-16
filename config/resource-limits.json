@@ -1,0 +1,29 @@
+{
+  "daytime": {
+    "schedule": "06:00-22:00",
+    "limits": {
+      "maxCpuPercent": 50,
+      "maxRamGB": 6,
+      "maxConcurrentTasks": 1,
+      "allowedModels": ["qwen"],
+      "headless": true,
+      "slowMo": 50
+    }
+  },
+  "nighttime": {
+    "schedule": "22:00-06:00",
+    "limits": {
+      "maxCpuPercent": 90,
+      "maxRamGB": 16,
+      "maxConcurrentTasks": 3,
+      "allowedModels": ["qwen", "deepseek", "codellama", "llava"],
+      "headless": false,
+      "slowMo": 100
+    }
+  },
+  "emergency": {
+    "killIfCpuAbove": 95,
+    "killIfRamAbove": 18,
+    "pauseIfOverLimit": true
+  }
+}
