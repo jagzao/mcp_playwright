@@ -1,0 +1,59 @@
+# Dependencies
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Build artifacts
+dist/
+*.log
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Data directories
+data/
+recordings/
+logs/
+backups/
+
+# Git
+.git/
+.gitignore
+.github/
+
+# Documentation
+*.md
+docs/
+RECOMMENDATIONS.md
+IMPLEMENTATION_STATUS.md
+FINAL_SUMMARY.md
+
+# Testing
+tests/
+*.test.ts
+*.spec.ts
+coverage/
+
+# Development
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Miscellaneous
+prometheus.yml
+.eslintrc.*
+.prettierrc
+tsconfig.json

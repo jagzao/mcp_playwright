@@ -2,6 +2,8 @@ import { chromium, Browser, Page, BrowserContext } from 'playwright';
 import { logger } from '../../../../lib/observability/logger.js';
 import { sanitizer } from '../../../../lib/security/input-sanitizer.js';
 import { retry } from '../../../../lib/resilience/retry.js';
+import { setCurrentPage as setVisionPage } from '../vision/index.js';
+import { setCurrentPage as setSessionPage } from '../session/index.js';
 
 let browser: Browser | null = null;
 let context: BrowserContext | null = null;
@@ -19,6 +21,10 @@ async function ensureBrowser() {
       locale: 'es-MX',
     });
     page = await context.newPage();
+
+    // Share page with vision and session tools
+    setVisionPage(page);
+    setSessionPage(page);
   }
   return { browser, context, page: page! };
 }

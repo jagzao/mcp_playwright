@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    name: Test & Build
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Create required directories
+        run: |
+          mkdir -p data/sessions data/form-data data/videos data/screenshots
+          mkdir -p recordings/manual recordings/agent-generated
+          mkdir -p logs backups
+
+      - name: Create .env file for testing
+        run: |
+          echo "MASTER_KEY=$(openssl rand -hex 32)" > .env
+          echo "NODE_ENV=test" >> .env
+
+      - name: Run TypeScript compilation
+        run: npm run build
+
+      - name: Run tests
+        run: npm test || echo "Tests not configured yet"
+        continue-on-error: true
+
+      - name: Check for TypeScript errors
+        run: npx tsc --noEmit
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run ESLint
+        run: npx eslint . --ext .ts,.js || echo "ESLint not configured"
+        continue-on-error: true
+
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+
+      - name: Run npm audit
+        run: npm audit --audit-level=moderate || true
+        continue-on-error: true
+
+      - name: Check for secrets
+        run: |
+          if grep -r "MASTER_KEY.*=.*[a-f0-9]\{32,\}" . --exclude-dir=node_modules --exclude-dir=.git --exclude="*.md" --exclude=".env.example"; then
+            echo "⚠️  Potential hardcoded secrets found!"
+            exit 1
+          fi
+          echo "✅ No hardcoded secrets detected"

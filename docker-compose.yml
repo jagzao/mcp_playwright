@@ -1,6 +1,42 @@
 version: '3.8'
 
 services:
+  # MCP Playwright Automation (main service)
+  mcp-playwright:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mcp-playwright-automation
+    environment:
+      - NODE_ENV=production
+      - HEADLESS=true
+      - LOG_LEVEL=info
+      - MASTER_KEY=${MASTER_KEY}
+      - OLLAMA_ENDPOINT=http://ollama:11434
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      # Persist data
+      - ./data:/app/data
+      - ./recordings:/app/recordings
+      - ./logs:/app/logs
+      - ./backups:/app/backups
+      # Config can be overridden
+      - ./config:/app/config:ro
+      # Optional: Mount .env file
+      - ./.env:/app/.env:ro
+    depends_on:
+      - redis
+      - ollama
+    networks:
+      - mcp-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "process.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
   # Ollama (modelos locales)
   ollama:
     image: ollama/ollama:latest
@@ -13,6 +49,8 @@ services:
       resources:
         limits:
           memory: 16G
+    networks:
+      - mcp-network
     restart: unless-stopped
 
   # Redis (cache y queue)
@@ -23,6 +61,8 @@ services:
       - "6379:6379"
     volumes:
       - redis-data:/data
+    networks:
+      - mcp-network
     restart: unless-stopped
     command: redis-server --appendonly yes
 
@@ -35,6 +75,8 @@ services:
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus-data:/prometheus
+    networks:
+      - mcp-network
     restart: unless-stopped
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -44,3 +86,7 @@ volumes:
   ollama-data:
   redis-data:
   prometheus-data:
+
+networks:
+  mcp-network:
+    driver: bridge

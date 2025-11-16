@@ -9,6 +9,7 @@ import { logger } from '../../lib/observability/logger.js';
 import { playwrightTools } from './tools/playwright/index.js';
 import { visionTools } from './tools/vision/index.js';
 import { dataTools } from './tools/data/index.js';
+import { sessionTools } from './tools/session/index.js';
 
 const server = new Server(
   {
@@ -27,6 +28,7 @@ const allTools = [
   ...playwrightTools,
   ...visionTools,
   ...dataTools,
+  ...sessionTools,
 ];
 
 // List available tools
