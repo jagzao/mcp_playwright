@@ -4,6 +4,269 @@
 
 Un sistema completo de automatización web que combina el Model Context Protocol (MCP) con Playwright y LLMs locales para crear un agente autónomo capaz de navegar, interactuar y automatizar tareas en la web usando lenguaje natural.
 
+---
+
+## 📦 Instalación Completa
+
+### Prerrequisitos
+- **Node.js** >= 20.0.0 ([Descargar aquí](https://nodejs.org/))
+- **16GB RAM** (mínimo 8GB para pruebas)
+- **25GB espacio en disco** (para modelos LLM)
+- **Git** para clonar el repositorio
+
+### Paso 1: Clonar el Repositorio
+```bash
+git clone https://github.com/tu-usuario/mcp_playwright.git
+cd mcp_playwright
+```
+
+### Paso 2: Instalar Dependencias
+```bash
+npm install
+```
+
+Este comando:
+- ✅ Instala todas las dependencias de Node.js
+- ✅ Ejecuta el post-install script automáticamente
+- ✅ Crea directorios necesarios (data/, logs/, etc.)
+- ✅ Instala Playwright y navegadores
+
+### Paso 3: Configuración Inicial
+```bash
+npm run init
+```
+
+Este comando:
+- ✅ Crea el archivo `.env` con una MASTER_KEY segura
+- ✅ Configura variables de entorno
+- ✅ Prepara directorios de datos
+
+**Archivo `.env` generado:**
+```bash
+# Configuración de seguridad
+MASTER_KEY=<clave-generada-automáticamente>
+
+# Entorno
+NODE_ENV=development
+
+# LLM Endpoints (opcional, usa valores por defecto)
+OLLAMA_ENDPOINT=http://localhost:11434
+QWEN_ENDPOINT=http://localhost:8000
+
+# Logs
+LOG_LEVEL=info
+```
+
+### Paso 4: Instalar Modelos LLM Locales
+```bash
+npm run setup
+```
+
+Este comando instala (puede tardar 20-30 minutos):
+- ✅ **Ollama** - Runtime para modelos locales
+- ✅ **Qwen2.5-Coder 7B** (4GB) - LLM principal para tareas
+- ✅ **DeepSeek-Coder 6.7B** (3.8GB) - Fallback para tareas complejas
+- ✅ **CodeLlama 7B** (3.8GB) - Segundo fallback
+- ✅ **Tesseract OCR** - Para extracción de texto de imágenes
+
+**Opcional:** Para visión avanzada (requiere GPU recomendada):
+```bash
+ollama pull llava:7b  # 4.7GB
+```
+
+### Paso 5: Verificar Instalación
+```bash
+npm run diagnose
+```
+
+**Salida esperada:**
+```
+🔍 MCP Playwright - System Diagnostic
+
+✅ Node.js version: v20.x.x
+✅ npm installed
+✅ Directories created
+✅ .env file exists
+✅ Ollama service running
+✅ Qwen model available
+✅ DeepSeek model available
+✅ Playwright installed
+✅ Tesseract OCR available
+
+🎉 All checks passed! System ready to use.
+```
+
+### Paso 6: Compilar TypeScript
+```bash
+npm run build
+```
+
+✅ **¡Instalación completada!** El sistema está listo para usar.
+
+---
+
+## 🚀 Guía de Uso Rápido
+
+### Opción 1: Modo Agente (Lenguaje Natural)
+
+**Ejecutar tareas con instrucciones en texto:**
+
+```bash
+# Ejemplo básico: Navegar y hacer screenshot
+npm run agent "Navega a google.com y toma un screenshot"
+
+# Ejemplo con formulario
+npm run agent "Entra a ejemplo.com/contacto y completa el formulario con nombre: Juan, email: juan@email.com"
+
+# Ejemplo con búsqueda
+npm run agent "Busca en Google 'mejores laptops 2024' y dame los primeros 5 resultados"
+```
+
+**Caso de uso real: LinkedIn**
+```bash
+# Paso 1: Guardar sesión de login (solo una vez)
+npm run agent "Navega a linkedin.com, haz login y guarda la sesión como 'linkedin'"
+
+# Paso 2: Usar la sesión guardada
+npm run agent "Restaura la sesión 'linkedin', busca empleos de desarrollador Python remoto y aplica a los primeros 3"
+```
+
+**Con datos de Excel:**
+```bash
+# Crear Excel en data/form-data/clientes.xlsx con columnas:
+# nombre | email | telefono | empresa
+
+# Ejecutar
+npm run agent "Completa el formulario en formulario.com/registro con los datos de clientes.xlsx, procesa todas las filas"
+```
+
+### Opción 2: Modo Record (Grabar Acciones)
+
+**Graba tus acciones manualmente y reutilízalas:**
+
+```bash
+# 1. Iniciar grabación
+npm run record https://ejemplo.com --name mi-workflow
+
+# 2. Se abre el navegador con Playwright Inspector
+# 3. Realiza las acciones manualmente (clicks, relleno de formularios, etc.)
+# 4. Cierra el navegador cuando termines
+
+# 5. La grabación se guarda en: recordings/manual/mi-workflow.spec.ts
+```
+
+### Opción 3: Modo Replay (Reproducir Grabaciones)
+
+**Ejecuta grabaciones guardadas:**
+
+```bash
+# Reproducir una grabación
+npm run replay recordings/manual/mi-workflow.spec.ts
+
+# Reproducir con datos diferentes
+npm run replay recordings/manual/form.spec.ts --data data/form-data/nuevos-clientes.xlsx
+```
+
+### Gestión de Sesiones
+
+**Guardar sesiones de login para reutilizar:**
+
+```bash
+# Guardar sesión actual
+npm run agent "Guarda la sesión actual como 'mi-sitio'"
+
+# Listar sesiones guardadas
+npm run agent "Lista todas las sesiones guardadas"
+
+# Restaurar sesión
+npm run agent "Restaura la sesión 'mi-sitio'"
+
+# Eliminar sesión
+npm run agent "Elimina la sesión 'mi-sitio'"
+```
+
+---
+
+## 📋 Comandos Disponibles
+
+### Comandos Principales
+```bash
+npm run agent "<instrucción>"     # Modo agente autónomo
+npm run record <url>              # Grabar workflow manualmente
+npm run replay <archivo>          # Reproducir grabación
+```
+
+### Comandos de Configuración
+```bash
+npm run init                      # Configuración inicial
+npm run setup                     # Instalar modelos LLM
+npm run diagnose                  # Verificar sistema
+npm run build                     # Compilar TypeScript
+```
+
+### Comandos de Desarrollo
+```bash
+npm run dev                       # Modo desarrollo con watch
+npm run test                      # Ejecutar tests
+npm run typecheck                 # Verificar tipos TypeScript
+```
+
+### Docker (Producción)
+```bash
+# Iniciar todo el stack
+docker-compose up -d
+
+# Ver logs
+docker-compose logs -f mcp-playwright
+
+# Detener
+docker-compose down
+```
+
+---
+
+## 💡 Ejemplos de Uso Completos
+
+### Ejemplo 1: Automatizar Aplicaciones a LinkedIn
+
+```bash
+# 1. Primera vez: Guardar sesión de LinkedIn
+npm run agent "Navega a linkedin.com, haz login con mis credenciales y guarda la sesión como 'linkedin-auth'"
+
+# 2. Crear archivo Excel con datos del CV
+# data/form-data/mi-cv.xlsx:
+# nombre      | telefono  | experiencia | skills
+# Juan Pérez  | 555-0001  | 5 años     | Python, React, AWS
+
+# 3. Aplicar a empleos automáticamente
+npm run agent "Restaura sesión 'linkedin-auth', busca empleos de 'Senior Developer' con Easy Apply, aplica a los primeros 5 usando datos de mi-cv.xlsx"
+```
+
+### Ejemplo 2: Rellenar Formularios Masivamente
+
+```bash
+# 1. Grabar el proceso una vez
+npm run record https://formulario.com/registro --name registro-clientes
+
+# 2. Preparar datos en Excel
+# data/form-data/clientes.xlsx con 100 filas
+
+# 3. Procesar todas las filas
+npm run agent "Usa la grabación registro-clientes.spec.ts con datos de clientes.xlsx, completa el formulario para cada fila"
+```
+
+### Ejemplo 3: Web Scraping e Investigación
+
+```bash
+# Extraer datos de productos
+npm run agent "Busca en amazon.com 'laptop dell', extrae nombre, precio y rating de los primeros 20 resultados, guárdalos en data/results/laptops.xlsx"
+
+# Monitorear precios
+npm run agent "Revisa el precio del producto en amazon.com/dp/B08X123, si es menor a $500 mándame una notificación"
+```
+
+---
+
 ## ✨ Características Principales
 
 ### 🎯 **Modos de Operación**
