@@ -5,6 +5,7 @@ import { ActionExecutor } from '../executor/index.js';
 import { logger } from '../../../lib/observability/logger.js';
 import { metrics } from '../../../lib/observability/metrics.js';
 import { agentConfig } from '../../../lib/config/index.js';
+import { llmManager } from '../../../console-client/src/llm/index.js';
 import { randomUUID } from 'crypto';
 
 export interface AgentTask {
@@ -138,7 +139,7 @@ export class AgentOrchestrator {
           }
 
           // Check if task is complete
-          if (this.isTaskComplete(task.instruction, stepHistory)) {
+          if (await this.isTaskComplete(task.instruction, stepHistory, observation)) {
             logger.info('Task appears complete', { step });
             break;
           }
@@ -212,21 +213,65 @@ export class AgentOrchestrator {
   }
 
   private async observe(): Promise<ObservationData> {
-    // For now, return a simple observation
-    // In a full implementation, this would call MCP tools to get page state
-    return {
-      method: 'accessibility',
-      elements: [],
-      cost: 0,
-      speed: 'fast',
-    };
+    try {
+      // Call MCP vision tools to get page state
+      logger.debug('Calling vision tools for page observation');
+
+      // Try accessibility tree first (fast and free)
+      let accessibility = null;
+      let dom = null;
+
+      try {
+        const a11yResult = await this.executor.callVisionTool('vision_accessibility_tree');
+        accessibility = a11yResult.snapshot;
+        logger.debug('Got accessibility snapshot', {
+          hasData: !!accessibility,
+        });
+      } catch (error: any) {
+        logger.warn('Failed to get accessibility tree', { error: error.message });
+      }
+
+      // Get DOM structure as fallback
+      try {
+        const domResult = await this.executor.callVisionTool('vision_get_dom_structure');
+        dom = domResult.structure;
+        logger.debug('Got DOM structure', {
+          inputs: dom?.inputs?.length || 0,
+          buttons: dom?.buttons?.length || 0,
+          links: dom?.links?.length || 0,
+        });
+      } catch (error: any) {
+        logger.warn('Failed to get DOM structure', { error: error.message });
+      }
+
+      // Use HybridObserver to process the raw data
+      const observation = await this.observer.observe({
+        accessibility,
+        dom,
+      });
+
+      logger.debug('Observation complete', {
+        method: observation.method,
+        elementCount: observation.elements.length,
+      });
+
+      return observation;
+    } catch (error: any) {
+      logger.error('Observation failed', { error: error.message });
+
+      // Return empty observation on failure
+      return {
+        method: 'accessibility',
+        elements: [],
+        cost: 0,
+        speed: 'fast',
+      };
+    }
   }
 
-  private isTaskComplete(instruction: string, stepHistory: Action[]): boolean {
-    // Simple heuristic: if we've done a reasonable number of steps, consider it done
-    // In reality, this would use the LLM to determine if the task is complete
-
-    const minSteps = 3;
+  private async isTaskComplete(instruction: string, stepHistory: Action[], observation: ObservationData): Promise<boolean> {
+    // Minimum steps before checking completion
+    const minSteps = 2;
     if (stepHistory.length < minSteps) {
       return false;
     }
@@ -240,7 +285,60 @@ export class AgentOrchestrator {
       return true;
     }
 
-    return false;
+    // Use LLM to intelligently determine if task is complete
+    try {
+      const prompt = this.buildCompletionCheckPrompt(instruction, stepHistory, observation);
+      const response = await llmManager.generate(prompt, {
+        temperature: 0.0, // Use low temperature for consistent yes/no answers
+        maxTokens: 100,
+      });
+
+      const answer = response.text.toLowerCase().trim();
+      const isComplete = answer.includes('yes') || answer.includes('complete') || answer.includes('done');
+
+      logger.debug('Task completion check', {
+        isComplete,
+        llmResponse: answer,
+      });
+
+      return isComplete;
+    } catch (error: any) {
+      logger.warn('Failed to check task completion with LLM', { error: error.message });
+      // Fallback to heuristic: assume not complete if we can't check
+      return false;
+    }
+  }
+
+  private buildCompletionCheckPrompt(instruction: string, stepHistory: Action[], observation: ObservationData): string {
+    const parts = [];
+
+    parts.push('You are evaluating whether a web automation task has been completed.');
+    parts.push(`\nOriginal instruction: "${instruction}"`);
+    parts.push(`\nSteps executed (${stepHistory.length}):`);
+
+    stepHistory.forEach((action, i) => {
+      const detail = action.url || action.selector || action.value || '';
+      parts.push(`${i + 1}. ${action.type} ${detail}`);
+    });
+
+    parts.push('\nCurrent page state:');
+    if (observation.elements.length > 0) {
+      parts.push(`- ${observation.elements.length} interactive elements found`);
+      const types = [...new Set(observation.elements.map(e => e.type))];
+      parts.push(`- Element types: ${types.join(', ')}`);
+    } else {
+      parts.push('- No interactive elements (page may have finished loading/submitting)');
+    }
+
+    parts.push('\nBased on the instruction and steps executed, is the task complete?');
+    parts.push('Answer with YES if the task is complete, or NO if more steps are needed.');
+    parts.push('Consider the task complete if:');
+    parts.push('- The main goal of the instruction has been achieved');
+    parts.push('- A form was submitted successfully (indicated by navigation or empty page)');
+    parts.push('- The requested information was found/displayed');
+    parts.push('\nAnswer (YES or NO):');
+
+    return parts.join('\n');
   }
 
   stop() {

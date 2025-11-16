@@ -11,9 +11,9 @@ const loadConfig = <T>(filename: string): T => {
   return JSON.parse(readFileSync(path, 'utf-8'));
 };
 
-export const llmConfig = loadConfig('llm-config.json');
-export const agentConfig = loadConfig('agent-config.json');
-export const resourceLimits = loadConfig('resource-limits.json');
+export const llmConfig = loadConfig<any>('llm-config.json');
+export const agentConfig = loadConfig<any>('agent-config.json');
+export const resourceLimits = loadConfig<any>('resource-limits.json');
 
 export const config = {
   env: process.env.NODE_ENV || 'development',

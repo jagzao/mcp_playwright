@@ -1,7 +1,7 @@
-import { llmConfig } from '../../lib/config/index.js';
-import { TimeUtils } from '../../lib/utils/time-utils.js';
-import { resourceMonitor } from '../../lib/utils/resource-monitor.js';
-import { logger } from '../../lib/observability/logger.js';
+import { llmConfig } from '../../../lib/config/index.js';
+import { TimeUtils } from '../../../lib/utils/time-utils.js';
+import { resourceMonitor } from '../../../lib/utils/resource-monitor.js';
+import { logger } from '../../../lib/observability/logger.js';
 
 export interface LLMResponse {
   text: string;

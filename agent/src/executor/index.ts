@@ -46,4 +46,12 @@ export class ActionExecutor {
     // Could be extended to check actual page state
     return true;
   }
+
+  async callVisionTool(toolName: string): Promise<any> {
+    if (!this.connected) {
+      throw new Error('Executor not connected. Call connect() first.');
+    }
+
+    return await this.mcpExecutor.callVisionTool(toolName);
+  }
 }

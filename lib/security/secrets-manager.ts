@@ -23,7 +23,7 @@ export class SecretsManager {
       cipher.final(),
     ]);
 
-    const authTag = cipher.getAuthTag();
+    const authTag = (cipher as any).getAuthTag();
 
     return JSON.stringify({
       iv: iv.toString('hex'),
@@ -42,7 +42,7 @@ export class SecretsManager {
       Buffer.from(iv, 'hex')
     );
 
-    decipher.setAuthTag(Buffer.from(authTag, 'hex'));
+    (decipher as any).setAuthTag(Buffer.from(authTag, 'hex'));
 
     const decrypted = Buffer.concat([
       decipher.update(Buffer.from(encrypted, 'hex')),

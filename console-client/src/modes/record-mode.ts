@@ -21,7 +21,7 @@ export class RecordMode {
       console.log(chalk.gray('\nYou can now:'));
       console.log(chalk.gray('  1. Replay:'), `npm run replay ${outputPath}`);
       console.log(chalk.gray('  2. Edit:'), `code ${outputPath}`);
-      console.log(chalk.gray('  3. Use in tests:'), `npx playwright test ${outputPath}\n`));
+      console.log(chalk.gray('  3. Use in tests:'), `npx playwright test ${outputPath}\n`);
 
       return { success: true, path: outputPath };
     } catch (error: any) {

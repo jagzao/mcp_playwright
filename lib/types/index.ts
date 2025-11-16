@@ -43,6 +43,7 @@ export interface ActionResult {
   element?: any;
   visible?: boolean;
   duration?: number;
+  data?: any;
 }
 
 export interface ObservationData {

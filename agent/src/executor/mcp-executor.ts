@@ -91,6 +91,7 @@ export class MCPExecutor {
       return {
         success: true,
         duration,
+        data: result,
       };
     } catch (error: any) {
       const duration = Date.now() - start;
@@ -111,6 +112,43 @@ export class MCPExecutor {
     }
   }
 
+  /**
+   * Call a vision tool to get page state
+   */
+  async callVisionTool(toolName: string): Promise<any> {
+    if (!this.client) {
+      throw new Error('MCP client not connected. Call connect() first.');
+    }
+
+    try {
+      const result = await this.client.callTool({
+        name: toolName,
+        arguments: {},
+      });
+
+      if (!result.content || !Array.isArray(result.content) || result.content.length === 0) {
+        throw new Error('No response from MCP vision tool');
+      }
+
+      const content = result.content[0];
+      if (content.type === 'text') {
+        const parsed = JSON.parse((content as any).text);
+        if (!parsed.success) {
+          throw new Error(parsed.error || 'Vision tool execution failed');
+        }
+        return parsed;
+      }
+
+      throw new Error('Unexpected response format from MCP vision tool');
+    } catch (error: any) {
+      logger.error('Vision tool call failed', {
+        toolName,
+        error: error.message,
+      });
+      throw error;
+    }
+  }
+
   private async executeWithMCP(action: Action): Promise<any> {
     const toolName = this.getToolName(action.type);
     const args = this.getToolArgs(action);
@@ -120,13 +158,13 @@ export class MCPExecutor {
       arguments: args,
     });
 
-    if (!result.content || result.content.length === 0) {
+    if (!result.content || !Array.isArray(result.content) || result.content.length === 0) {
       throw new Error('No response from MCP tool');
     }
 
     const content = result.content[0];
     if (content.type === 'text') {
-      const parsed = JSON.parse(content.text);
+      const parsed = JSON.parse((content as any).text);
       if (!parsed.success) {
         throw new Error(parsed.error || 'Tool execution failed');
       }

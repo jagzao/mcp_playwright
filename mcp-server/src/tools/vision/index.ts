@@ -1,6 +1,5 @@
 import { Page } from 'playwright';
 import { createWorker } from 'tesseract.js';
-import { logger } from '../../../../lib/observability/logger.js';
 
 // Placeholder for page - will be passed from playwright tools
 let currentPage: Page | null = null;
@@ -9,7 +8,7 @@ export function setCurrentPage(page: Page) {
   currentPage = page;
 }
 
-export const visionTools = [
+export const visionTools: any[] = [
   {
     name: 'vision_accessibility_tree',
     description: 'Get accessibility tree of current page',
@@ -24,14 +23,9 @@ export const visionTools = [
 
       const snapshot = await currentPage.accessibility.snapshot();
 
-      // Extract interactive elements
-      const elements = extractInteractiveElements(snapshot);
-
       return {
         success: true,
-        method: 'accessibility',
-        elements,
-        elementCount: elements.length,
+        snapshot, // Return raw snapshot for agent observers to process
       };
     },
   },
@@ -60,7 +54,7 @@ export const visionTools = [
           success: true,
           method: 'ocr',
           text,
-          blockCount: blocks.length,
+          blockCount: blocks?.length || 0,
           cost: 0,
         };
       } catch (error: any) {
@@ -120,37 +114,3 @@ export const visionTools = [
     },
   },
 ];
-
-function extractInteractiveElements(snapshot: any, elements: any[] = []): any[] {
-  if (!snapshot) return elements;
-
-  if (snapshot.role) {
-    const interactiveRoles = [
-      'button',
-      'textbox',
-      'link',
-      'checkbox',
-      'radio',
-      'combobox',
-      'searchbox',
-      'slider',
-      'tab',
-      'menuitem',
-    ];
-
-    if (interactiveRoles.includes(snapshot.role)) {
-      elements.push({
-        role: snapshot.role,
-        name: snapshot.name,
-        value: snapshot.value,
-        description: snapshot.description,
-      });
-    }
-  }
-
-  if (snapshot.children) {
-    snapshot.children.forEach((child: any) => extractInteractiveElements(child, elements));
-  }
-
-  return elements;
-}
