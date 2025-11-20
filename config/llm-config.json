@@ -2,10 +2,10 @@
   "llms": [
     {
       "name": "qwen",
-      "type": "local",
+      "type": "ollama",
       "priority": 1,
-      "model": "qwen2.5-coder:7b",
-      "endpoint": "http://localhost:8000",
+      "model": "qwen:7b",
+      "endpoint": "http://localhost:11434",
       "cost": 0,
       "speed": "fast",
       "schedule": "always",
@@ -24,7 +24,7 @@
       "speed": "medium",
       "schedule": {
         "daytime": false,
-        "allowed": [{"start": "22:00", "end": "06:00"}]
+        "allowed": [{ "start": "22:00", "end": "06:00" }]
       },
       "resourceLimits": {
         "maxCpuPercent": 80,
@@ -40,7 +40,7 @@
       "cost": 0,
       "speed": "slow",
       "schedule": {
-        "allowed": [{"start": "22:00", "end": "06:00"}]
+        "allowed": [{ "start": "22:00", "end": "06:00" }]
       },
       "resourceLimits": {
         "maxCpuPercent": 90,
@@ -58,7 +58,7 @@
         "cost": 0,
         "useCase": "screenshot-analysis",
         "schedule": {
-          "allowed": [{"start": "22:00", "end": "06:00"}]
+          "allowed": [{ "start": "22:00", "end": "06:00" }]
         }
       },
       {

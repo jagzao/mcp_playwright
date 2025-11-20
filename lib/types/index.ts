@@ -2,13 +2,15 @@
 
 export interface LLMConfig {
   name: string;
-  type: 'local' | 'ollama' | 'openai';
+  type: "local" | "ollama" | "openai";
   priority: number;
   model: string;
   endpoint: string;
   cost: number;
-  speed: 'fast' | 'medium' | 'slow';
-  schedule: string | { daytime?: boolean; allowed?: Array<{ start: string; end: string }> };
+  speed: "fast" | "medium" | "slow";
+  schedule:
+    | string
+    | { daytime?: boolean; allowed?: Array<{ start: string; end: string }> };
   resourceLimits?: {
     maxCpuPercent: number;
     maxRamGB: number;
@@ -29,10 +31,19 @@ export interface TaskContext {
 }
 
 export interface Action {
-  type: 'navigate' | 'click' | 'fill' | 'select' | 'scroll' | 'wait' | 'screenshot' | 'download';
+  type:
+    | "navigate"
+    | "click"
+    | "fill"
+    | "select"
+    | "scroll"
+    | "wait"
+    | "screenshot"
+    | "download";
   selector?: string;
   value?: any;
   url?: string;
+  path?: string;
   timeout?: number;
   expectedTag?: string;
 }
@@ -47,13 +58,13 @@ export interface ActionResult {
 }
 
 export interface ObservationData {
-  method: 'accessibility' | 'dom' | 'ocr' | 'llava' | 'hybrid';
+  method: "accessibility" | "dom" | "ocr" | "llava" | "hybrid";
   elements: InteractiveElement[];
   structure?: any;
   text?: string;
   screenshot?: Buffer;
   cost: number;
-  speed: 'fast' | 'medium' | 'slow';
+  speed: "fast" | "medium" | "slow";
 }
 
 export interface InteractiveElement {
@@ -77,7 +88,7 @@ export interface AgentContext {
 
 export interface RetryConfig {
   maxAttempts?: number;
-  backoffStrategy?: 'exponential' | 'linear' | 'fibonacci';
+  backoffStrategy?: "exponential" | "linear" | "fibonacci";
   retryableErrors?: string[];
   onRetry?: (attempt: number, error: Error) => void;
 }

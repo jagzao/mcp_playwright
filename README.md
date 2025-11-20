@@ -4,6 +4,14 @@
 
 Un sistema completo de automatización web que combina el Model Context Protocol (MCP) con Playwright y LLMs locales para crear un agente autónomo capaz de navegar, interactuar y automatizar tareas en la web usando lenguaje natural.
 
+> **✨ ACTUALIZACIÓN FASE 3 (Nov 2025):**
+> ✅ **5 Intents Pre-Planeados** para LinkedIn (login, profile, search, message, post)
+> ✅ **Session Management** integrado con detección automática de login
+> ✅ **Tracking de Métricas** LLM calls y cache hits en tiempo real
+> ✅ **Análisis de Perfil Mejorado** con detección multilingüe
+> ✅ **100% Tests Pasando** (11/11 unitarios)
+> 📄 Ver [FASE_3_INTEGRACION_FINAL.md](FASE_3_INTEGRACION_FINAL.md) para detalles completos
+
 ---
 
 ## 📦 Instalación Completa

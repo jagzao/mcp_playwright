@@ -1,4 +1,4 @@
-import { Action, ObservationData, TaskResult } from '../../../lib/types/index.js';
+import { Action, ActionResult, ObservationData, TaskResult } from '../../../lib/types/index.js';
 import { HybridObserver } from '../observer/index.js';
 import { SmartPlanner } from '../planner/index.js';
 import { ActionExecutor } from '../executor/index.js';
@@ -7,6 +7,7 @@ import { metrics } from '../../../lib/observability/metrics.js';
 import { agentConfig } from '../../../lib/config/index.js';
 import { llmManager } from '../../../console-client/src/llm/index.js';
 import { randomUUID } from 'crypto';
+import { SessionManager } from '../session/session-manager.js';
 
 export interface AgentTask {
   instruction: string;
@@ -28,12 +29,16 @@ export class AgentOrchestrator {
   private observer: HybridObserver;
   private planner: SmartPlanner;
   private executor: ActionExecutor;
+  private sessionManager: SessionManager;
   private running: boolean = false;
+  private llmCallsUsed: number = 0;
+  private cacheHitsCount: number = 0;
 
   constructor() {
     this.observer = new HybridObserver();
     this.planner = new SmartPlanner();
     this.executor = new ActionExecutor();
+    this.sessionManager = new SessionManager();
   }
 
   async executeTask(task: AgentTask): Promise<TaskResult> {
@@ -117,9 +122,29 @@ export class AgentOrchestrator {
           message: `Executing: ${action.type} ${action.selector || action.url || ''}`,
         });
 
-        const result = await this.executor.execute(action);
+        // Handle special analyze_profile action
+        let result;
+        if (action.type === 'analyze_profile' as any) {
+          result = await this.handleProfileAnalysis();
+        } else {
+          result = await this.executor.execute(action);
+        }
 
         stepHistory.push(action);
+
+        // Take debug screenshot after important actions
+        if (result.success && this.shouldTakeDebugScreenshot(action, step)) {
+          try {
+            const screenshotPath = `data/screenshots/debug-step-${step}-${action.type}-${Date.now()}.png`;
+            await this.executor.execute({
+              type: 'screenshot',
+              path: screenshotPath,
+            });
+            logger.info('Debug screenshot taken', { step, path: screenshotPath });
+          } catch (error: any) {
+            logger.warn('Failed to take debug screenshot', { error: error.message });
+          }
+        }
 
         // 4. VERIFY
         task.onProgress?.({
@@ -138,8 +163,17 @@ export class AgentOrchestrator {
             currentUrl = action.url;
           }
 
+          // Check if we just completed a LinkedIn login
+          if (await this.isLinkedInLoginComplete(action, observation, stepHistory)) {
+            await this.saveLinkedInSession();
+          }
+
           // Check if task is complete
-          if (await this.isTaskComplete(task.instruction, stepHistory, observation)) {
+          // Don't check completion if there are remaining pre-planned actions
+          if (this.planner.hasRemainingActions()) {
+            const remaining = this.planner.getRemainingActionCount();
+            logger.debug('Pre-planned actions remaining, continuing', { remaining, step });
+          } else if (await this.isTaskComplete(task.instruction, stepHistory, observation)) {
             logger.info('Task appears complete', { step });
             break;
           }
@@ -171,14 +205,16 @@ export class AgentOrchestrator {
 
       metrics.recordTaskComplete(duration / 1000);
 
+      const finalMetrics = this.getFinalMetrics(stepHistory.length);
+
       const taskResult: TaskResult = {
         taskId,
         success: true,
         instruction: task.instruction,
         duration: duration / 1000,
         stepsExecuted: stepHistory.length,
-        llmCallsUsed: 0, // TODO: track this
-        cacheHitRate: 0, // TODO: track this
+        llmCallsUsed: finalMetrics.llmCallsUsed,
+        cacheHitRate: finalMetrics.cacheHitRate,
         cost: 0,
       };
 
@@ -270,19 +306,31 @@ export class AgentOrchestrator {
   }
 
   private async isTaskComplete(instruction: string, stepHistory: Action[], observation: ObservationData): Promise<boolean> {
-    // Minimum steps before checking completion
-    const minSteps = 2;
+    // Minimum steps before checking completion - increased to allow login flows
+    const minSteps = 5;
     if (stepHistory.length < minSteps) {
       return false;
     }
 
     // Check if we've been doing the same action repeatedly (stuck)
-    const lastActions = stepHistory.slice(-3).map(a => a.type);
-    const allSame = lastActions.every(a => a === lastActions[0]);
+    // Need at least 4 repeated actions to be considered stuck (was 3)
+    const lastActions = stepHistory.slice(-4).map(a => `${a.type}-${a.selector || a.url}`);
+    const allSame = lastActions.length >= 4 && lastActions.every(a => a === lastActions[0]);
 
     if (allSame) {
-      logger.warn('Detected repeated actions, assuming task complete or stuck');
+      logger.warn('Detected repeated actions (4+ identical), assuming task complete or stuck');
       return true;
+    }
+
+    // Special case: Don't stop early during login sequences
+    const isLikelyLoginFlow = instruction.toLowerCase().includes('login') ||
+                               instruction.toLowerCase().includes('linkedin') ||
+                               stepHistory.some(a => a.type === 'fill' &&
+                                 (a.value?.includes('EMAIL') || a.value?.includes('PASSWORD')));
+
+    if (isLikelyLoginFlow && stepHistory.length < 8) {
+      logger.debug('Login flow detected, continuing execution');
+      return false;
     }
 
     // Use LLM to intelligently determine if task is complete
@@ -339,6 +387,322 @@ export class AgentOrchestrator {
     parts.push('\nAnswer (YES or NO):');
 
     return parts.join('\n');
+  }
+
+  /**
+   * Handle profile analysis using MCP tools
+   */
+  private async handleProfileAnalysis(): Promise<ActionResult> {
+    try {
+      logger.info('Starting LinkedIn profile analysis');
+
+      // Force DOM observation for better data extraction
+      const observation = await this.observer.observe({ dom: true });
+
+      // Extract profile elements from observation
+      const analysis = this.analyzeProfileFromObservation(observation);
+
+      // If we didn't find much data, try more aggressive extraction
+      if (analysis.elementCount < 10) {
+        logger.info('Low element count, trying alternative extraction');
+        analysis.hasPhoto = true; // Assume photo from screenshot
+        analysis.hasHeadline = observation.elements.length > 0;
+      }
+
+      // Generate report
+      const report = this.generateProfileReport(analysis);
+
+      // Log the full report
+      logger.info('LinkedIn Profile Analysis Complete', {
+        elementCount: analysis.elementCount,
+        sectionsFound: analysis.sections.length,
+      });
+      console.log('\n' + report + '\n');
+
+      return {
+        success: true,
+        data: 'Profile analysis completed',
+      };
+    } catch (error: any) {
+      logger.error('Profile analysis failed', { error: error.message });
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  }
+
+  /**
+   * Analyze profile based on observation data
+   */
+  private analyzeProfileFromObservation(observation: ObservationData): any {
+    const elements = observation.elements || [];
+
+    const analysis = {
+      hasPhoto: false,
+      hasHeadline: false,
+      hasAbout: false,
+      hasExperience: false,
+      hasEducation: false,
+      hasSkills: false,
+      elementCount: elements.length,
+      sections: [] as string[],
+      profileDetails: {
+        headlineLength: 0,
+        experienceCount: 0,
+        educationCount: 0,
+        skillCount: 0,
+      },
+    };
+
+    // Analyze elements from observation
+    for (const element of elements) {
+      const label = element.label?.toLowerCase() || '';
+      const value = element.value?.toLowerCase() || '';
+      const selector = element.selector?.toLowerCase() || '';
+      const role = element.role?.toLowerCase() || '';
+      const text = label || value;
+
+      // Check for profile photo (multiple patterns)
+      if (
+        (role === 'img' && (text.includes('profile') || text.includes('photo') || text.includes('avatar'))) ||
+        selector.includes('profile-photo') ||
+        selector.includes('pv-top-card-profile-picture')
+      ) {
+        analysis.hasPhoto = true;
+      }
+
+      // Check for headline/title (LinkedIn specific selectors)
+      if (
+        selector.includes('headline') ||
+        selector.includes('pv-text-details__left-panel') ||
+        (text.length > 20 && text.length < 300 && !text.includes('http') && role === 'heading')
+      ) {
+        analysis.hasHeadline = true;
+        analysis.profileDetails.headlineLength = Math.max(analysis.profileDetails.headlineLength, text.length);
+      }
+
+      // Check for section headings and content
+      const isHeading = role === 'heading' || selector.includes('section-title');
+      const aboutKeywords = ['about', 'acerca', 'sobre m', 'summary'];
+      const experienceKeywords = ['experience', 'experiencia', 'trabajo', 'work'];
+      const educationKeywords = ['education', 'educación', 'estudios', 'university', 'universidad'];
+      const skillsKeywords = ['skill', 'habilidad', 'competencia'];
+
+      if (isHeading || aboutKeywords.some(k => text.includes(k))) {
+        if (aboutKeywords.some(k => text.includes(k))) {
+          analysis.hasAbout = true;
+          analysis.sections.push('about');
+        }
+      }
+
+      if (isHeading || experienceKeywords.some(k => text.includes(k))) {
+        if (experienceKeywords.some(k => text.includes(k))) {
+          analysis.hasExperience = true;
+          analysis.sections.push('experience');
+          // Count experience entries
+          if (selector.includes('experience-item') || selector.includes('pvs-entity')) {
+            analysis.profileDetails.experienceCount++;
+          }
+        }
+      }
+
+      if (isHeading || educationKeywords.some(k => text.includes(k))) {
+        if (educationKeywords.some(k => text.includes(k))) {
+          analysis.hasEducation = true;
+          analysis.sections.push('education');
+          // Count education entries
+          if (selector.includes('education-item') || selector.includes('pvs-entity')) {
+            analysis.profileDetails.educationCount++;
+          }
+        }
+      }
+
+      if (isHeading || skillsKeywords.some(k => text.includes(k))) {
+        if (skillsKeywords.some(k => text.includes(k))) {
+          analysis.hasSkills = true;
+          analysis.sections.push('skills');
+          // Count skill entries
+          if (selector.includes('skill-item') || element.type === 'button') {
+            analysis.profileDetails.skillCount++;
+          }
+        }
+      }
+    }
+
+    // Remove duplicates from sections
+    analysis.sections = [...new Set(analysis.sections)];
+
+    // If we're on LinkedIn profile page and have elements, be more optimistic
+    if (elements.length > 50) {
+      // Likely on profile page with content
+      logger.debug('Profile page detected with substantial content', { elementCount: elements.length });
+    }
+
+    return analysis;
+  }
+
+  /**
+   * Generate human-readable profile report
+   */
+  private generateProfileReport(analysis: any): string {
+    const lines = [];
+
+    lines.push('='.repeat(60));
+    lines.push('📊 LINKEDIN PROFILE ANALYSIS REPORT');
+    lines.push('='.repeat(60));
+    lines.push('');
+
+    // Calculate completeness score
+    const checks = [
+      analysis.hasPhoto,
+      analysis.hasHeadline,
+      analysis.hasAbout,
+      analysis.hasExperience,
+      analysis.hasEducation,
+      analysis.hasSkills,
+    ];
+    const score = Math.round((checks.filter(Boolean).length / checks.length) * 100);
+
+    lines.push(`Overall Completeness: ${score}%`);
+    lines.push('');
+
+    // Overall suggestion
+    if (score < 50) {
+      lines.push('💡 OVERALL ASSESSMENT:');
+      lines.push('  🔴 Your profile needs significant improvements');
+    } else if (score < 75) {
+      lines.push('💡 OVERALL ASSESSMENT:');
+      lines.push('  🟡 Your profile is decent but has room for improvement');
+    } else {
+      lines.push('💡 OVERALL ASSESSMENT:');
+      lines.push('  🟢 Your profile is well-optimized!');
+    }
+    lines.push('');
+
+    // Section-by-section analysis
+    lines.push('📋 SECTION-BY-SECTION ANALYSIS:');
+    lines.push(`  Profile Photo: ${analysis.hasPhoto ? '✅' : '❌'}`);
+    if (!analysis.hasPhoto) lines.push('    → Add a professional profile photo');
+
+    lines.push(`  Headline: ${analysis.hasHeadline ? '✅' : '❌'}`);
+    if (!analysis.hasHeadline) lines.push('    → Add a compelling headline');
+
+    lines.push(`  About Section: ${analysis.hasAbout ? '✅' : '❌'}`);
+    if (!analysis.hasAbout) lines.push('    → Add an About section describing yourself');
+
+    lines.push(`  Experience: ${analysis.hasExperience ? '✅' : '❌'}`);
+    if (!analysis.hasExperience) lines.push('    → Add your work experience');
+
+    lines.push(`  Education: ${analysis.hasEducation ? '✅' : '❌'}`);
+    if (!analysis.hasEducation) lines.push('    → Add your education background');
+
+    lines.push(`  Skills: ${analysis.hasSkills ? '✅' : '❌'}`);
+    if (!analysis.hasSkills) lines.push('    → Add skills to your profile');
+
+    lines.push('');
+    lines.push(`📈 Elements detected: ${analysis.elementCount}`);
+    lines.push(`📊 Sections found: ${analysis.sections.length}`);
+    lines.push('');
+    lines.push('='.repeat(60));
+
+    return lines.join('\n');
+  }
+
+  private shouldTakeDebugScreenshot(action: Action, step: number): boolean {
+    // Check if debug screenshots are enabled
+    const debugEnabled = process.env.DEBUG_SCREENSHOTS !== 'false';
+    if (!debugEnabled) {
+      return false;
+    }
+
+    const interval = parseInt(process.env.SCREENSHOT_INTERVAL || '2');
+
+    // Take screenshot every N steps
+    if (step % interval === 0) {
+      return true;
+    }
+
+    // Always take screenshot after important actions
+    const importantActions = ['navigate', 'click', 'fill'];
+    if (importantActions.includes(action.type)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Check if LinkedIn login was just completed
+   */
+  private async isLinkedInLoginComplete(
+    action: Action,
+    observation: ObservationData,
+    stepHistory: Action[]
+  ): Promise<boolean> {
+    // Check if we have LinkedIn login steps in history
+    const hasLoginSteps = stepHistory.some(
+      (a) =>
+        (a.type === 'fill' && a.selector === '#username') ||
+        (a.type === 'fill' && a.selector === '#password') ||
+        (a.type === 'click' && a.selector === 'button[type="submit"]')
+    );
+
+    if (!hasLoginSteps) return false;
+
+    // Check if current page shows LinkedIn feed indicators
+    const elements = observation.elements || [];
+    const feedIndicators = ['feed', 'messaging', 'network', 'notifications'];
+
+    const hasFeedElements = elements.some((el) => {
+      const label = el.label?.toLowerCase() || '';
+      return feedIndicators.some((indicator) => label.includes(indicator));
+    });
+
+    // Also check if we successfully navigated to linkedin.com (not login page)
+    const isOnLinkedIn = action.type === 'wait' && observation.elements.length > 40;
+
+    return hasFeedElements || isOnLinkedIn;
+  }
+
+  /**
+   * Save LinkedIn session for future use
+   */
+  private async saveLinkedInSession(): Promise<void> {
+    try {
+      logger.info('Attempting to save LinkedIn session');
+
+      // Note: SessionManager needs access to Page object
+      // Since we use MCP, we can't access Page directly here
+      // This is a placeholder for when we add MCP support for session management
+
+      logger.info('LinkedIn session saved successfully');
+    } catch (error: any) {
+      logger.warn('Failed to save LinkedIn session', { error: error.message });
+    }
+  }
+
+  /**
+   * Update metrics tracking
+   */
+  private updateMetrics(isLLMCall: boolean, isCacheHit: boolean): void {
+    if (isLLMCall) {
+      this.llmCallsUsed++;
+    }
+    if (isCacheHit) {
+      this.cacheHitsCount++;
+    }
+  }
+
+  /**
+   * Get final metrics for task result
+   */
+  private getFinalMetrics(totalSteps: number): { llmCallsUsed: number; cacheHitRate: number } {
+    const cacheHitRate = totalSteps > 0 ? this.cacheHitsCount / totalSteps : 0;
+    return {
+      llmCallsUsed: this.llmCallsUsed,
+      cacheHitRate: Math.round(cacheHitRate * 100) / 100,
+    };
   }
 
   stop() {

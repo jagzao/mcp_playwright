@@ -1,7 +1,7 @@
-import { llmConfig } from '../../../lib/config/index.js';
-import { TimeUtils } from '../../../lib/utils/time-utils.js';
-import { resourceMonitor } from '../../../lib/utils/resource-monitor.js';
-import { logger } from '../../../lib/observability/logger.js';
+import { llmConfig } from "../../../lib/config/index.js";
+import { TimeUtils } from "../../../lib/utils/time-utils.js";
+import { resourceMonitor } from "../../../lib/utils/resource-monitor.js";
+import { logger } from "../../../lib/observability/logger.js";
 
 export interface LLMResponse {
   text: string;
@@ -18,25 +18,30 @@ export interface LLMClient {
 }
 
 export class QwenClient implements LLMClient {
-  name = 'qwen';
+  name = "qwen";
   private endpoint: string;
+  private model: string;
 
-  constructor(endpoint: string = 'http://localhost:8000') {
+  constructor(
+    model: string = "qwen:7b",
+    endpoint: string = "http://localhost:11434"
+  ) {
+    this.model = model;
     this.endpoint = endpoint;
   }
 
   async generate(prompt: string, options: any = {}): Promise<LLMResponse> {
-    const { temperature = 0.1, maxTokens = 2000 } = options;
+    const { temperature = 0.1 } = options;
 
     try {
-      const response = await fetch(`${this.endpoint}/v1/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await fetch(`${this.endpoint}/api/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: 'qwen2.5-coder',
+          model: this.model,
           prompt,
           temperature,
-          max_tokens: maxTokens,
+          stream: false,
         }),
       });
 
@@ -47,25 +52,28 @@ export class QwenClient implements LLMClient {
       const data = await response.json();
 
       return {
-        text: data.choices[0].text,
-        model: 'qwen2.5-coder',
+        text: data.response,
+        model: this.model,
         cached: false,
         cost: 0,
-        tokensUsed: data.usage?.total_tokens,
       };
     } catch (error: any) {
-      logger.error('Qwen generation failed', { error: error.message });
+      logger.error("Qwen generation failed", { error: error.message });
       throw error;
     }
   }
 
   async isAvailable(): Promise<boolean> {
     try {
-      const response = await fetch(`${this.endpoint}/health`, {
-        method: 'GET',
+      const response = await fetch(`${this.endpoint}/api/tags`, {
+        method: "GET",
         signal: AbortSignal.timeout(5000),
       });
-      return response.ok;
+
+      if (!response.ok) return false;
+
+      const data = await response.json();
+      return data.models?.some((m: any) => m.name === this.model);
     } catch {
       return false;
     }
@@ -77,8 +85,11 @@ export class OllamaClient implements LLMClient {
   private endpoint: string;
   private model: string;
 
-  constructor(model: string = 'deepseek-coder:6.7b', endpoint: string = 'http://localhost:11434') {
-    this.name = model.split(':')[0];
+  constructor(
+    model: string = "deepseek-coder:6.7b",
+    endpoint: string = "http://localhost:11434"
+  ) {
+    this.name = model.split(":")[0];
     this.endpoint = endpoint;
     this.model = model;
   }
@@ -88,8 +99,8 @@ export class OllamaClient implements LLMClient {
 
     try {
       const response = await fetch(`${this.endpoint}/api/generate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: this.model,
           prompt,
@@ -111,7 +122,10 @@ export class OllamaClient implements LLMClient {
         cost: 0,
       };
     } catch (error: any) {
-      logger.error('Ollama generation failed', { model: this.model, error: error.message });
+      logger.error("Ollama generation failed", {
+        model: this.model,
+        error: error.message,
+      });
       throw error;
     }
   }
@@ -119,7 +133,7 @@ export class OllamaClient implements LLMClient {
   async isAvailable(): Promise<boolean> {
     try {
       const response = await fetch(`${this.endpoint}/api/tags`, {
-        method: 'GET',
+        method: "GET",
         signal: AbortSignal.timeout(5000),
       });
 

@@ -66,10 +66,18 @@ export class IntelligentRetry {
   }
 
   private classifyError(error: any): string {
-    if (error.name === 'TimeoutError') return 'timeout';
-    if (error.code === 'ECONNRESET' || error.code === 'ENOTFOUND') return 'network';
-    if (error.status === 429) return 'rate-limit';
+    const errorMessage = error.message?.toLowerCase() || '';
+
+    if (error.name === 'TimeoutError' || errorMessage.includes('timeout')) return 'timeout';
+    if (error.code === 'ECONNRESET' || error.code === 'ENOTFOUND' || errorMessage.includes('network')) return 'network';
+    if (error.status === 429 || errorMessage.includes('rate limit')) return 'rate-limit';
     if (error.status >= 500) return 'server-error';
+
+    // Additional error types for Playwright
+    if (errorMessage.includes('not found') || errorMessage.includes('no element')) return 'not-found';
+    if (errorMessage.includes('detached') || errorMessage.includes('detached from frame')) return 'detached';
+    if (errorMessage.includes('navigation') || errorMessage.includes('navigating')) return 'navigation';
+
     return 'unknown';
   }
 
