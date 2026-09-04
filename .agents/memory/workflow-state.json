@@ -1,0 +1,16 @@
+{
+  "currentFeature": "browser-gateway-mvp",
+  "currentStage": "implementation-planning",
+  "status": "ready",
+  "source": "docs/user-stories/US-001-browser-gateway-mvp.md",
+  "branch": "feat/browser-gateway-mvp",
+  "stages": {
+    "discovery": "done",
+    "spec": "done",
+    "implementation-planning": "ready",
+    "implementation": "pending",
+    "quality": "pending",
+    "independent-review": "pending",
+    "final-report": "pending"
+  }
+}
