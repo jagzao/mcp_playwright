@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BrowserGateway, type GatewayOptions } from '../../../lib/browser-gateway/application/browser-gateway.js';
+import { HmacApprovalRegistry } from '../../../lib/browser-gateway/application/approval-registry.js';
 import { LlmOperatorRouter, type LlmOperator } from '../../../lib/browser-gateway/application/llm-operator-router.js';
 import type { BrowserEngine, BrowserEngineHealth } from '../../../lib/browser-gateway/domain/browser-engine.js';
 import type { BrowserEngineId, BrowserEngineResult, BrowserExecutionTelemetry } from '../../../lib/browser-gateway/domain/browser-result.js';
@@ -176,11 +177,12 @@ describe('BrowserGateway facade (US-001)', () => {
     }
   });
 
-  it('AC7: safety approval — side-effect without approval is blocked; with approval executes', async () => {
+  it('AC7: safety approval — side-effect without approval is blocked; with a registry-issued token executes', async () => {
     const primary = new FakeEngine('obscura', success('obscura'));
     const fallback = new FakeEngine('playwright', success('playwright'));
     const telemetry = new CapturingTelemetry();
-    const gateway = buildGateway(primary, fallback, telemetry);
+    const registry = new HmacApprovalRegistry('test-secret');
+    const gateway = buildGateway(primary, fallback, telemetry, { approvalRegistry: registry });
 
     const blocked = await gateway.executeTask(
       task({ action: { type: 'submit', target: '#form' } }),
@@ -191,8 +193,17 @@ describe('BrowserGateway facade (US-001)', () => {
     }
     expect(primary.executeCalls).toBe(0);
 
-    const approved = await gateway.executeTask(
+    // A bare caller-supplied approved:true must NOT self-approve (AC19).
+    const selfApproved = await gateway.executeTask(
       task({ action: { type: 'submit', target: '#form' }, approval: { approved: true, approvalId: 'a-1' } }),
+    );
+    expect(selfApproved.status).toBe('blocked');
+    expect(primary.executeCalls).toBe(0);
+
+    // Only a registry-issued token authorizes execution.
+    const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'submit' });
+    const approved = await gateway.executeTask(
+      task({ action: { type: 'submit', target: '#form' }, approval: { approved: true, approvalId: token.approvalId, signature: token.signature } }),
     );
     expect(approved.status).toBe('success');
     expect(primary.executeCalls).toBe(1);

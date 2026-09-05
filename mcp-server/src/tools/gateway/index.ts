@@ -38,14 +38,60 @@ function buildResearchAgent(mode: ResearchMode, sessionId: string): ResearchAgen
 }
 
 function researchRequestArgs(args: Record<string, unknown>): ResearchRequest {
+  const mode = (args.mode as ResearchMode) ?? 'standard';
   return {
     question: String(args.question ?? ''),
-    mode: (args.mode as ResearchMode) ?? 'standard',
+    mode,
     sessionId: String(args.sessionId ?? 'default'),
-    budget: (args.budget as ResearchRequest['budget']) ?? undefined,
+    budget: clampBudget(args.budget as ResearchRequest['budget'] | undefined, mode),
     primaryDomains: args.primaryDomains as string[] | undefined,
     highCoIDomains: args.highCoIDomains as string[] | undefined,
   };
+}
+
+/**
+ * Clamp caller-supplied budget overrides to trusted ceilings (AC15 / MEDIUM-6).
+ *
+ * A hostile caller must not be able to inflate the budget (e.g.
+ * `maxSearchRequests: 1e9`) to bypass cost controls. Each override is clamped
+ * to the mode's default envelope so a caller can only *reduce* a dimension,
+ * never raise it above the trusted default.
+ */
+function clampBudget(
+  budget: ResearchRequest['budget'] | undefined,
+  mode: ResearchMode,
+): ResearchRequest['budget'] {
+  if (!budget) return undefined;
+  const ceiling = defaultBudgetForMode(mode);
+  const clamp = (v: number | undefined, max: number): number | undefined =>
+    v === undefined ? undefined : Math.max(0, Math.min(Math.floor(v), max));
+  return {
+    maxSearchRequests: clamp(budget.maxSearchRequests, ceiling.maxSearchRequests),
+    maxPagesRead: clamp(budget.maxPagesRead, ceiling.maxPagesRead),
+    maxModelCalls: clamp(budget.maxModelCalls, ceiling.maxModelCalls),
+    maxScreenshots: clamp(budget.maxScreenshots, ceiling.maxScreenshots),
+    maxCostUsd:
+      budget.maxCostUsd === undefined
+        ? undefined
+        : Math.max(0, Math.min(budget.maxCostUsd, ceiling.maxCostUsd)),
+  };
+}
+
+function defaultBudgetForMode(mode: ResearchMode): {
+  maxSearchRequests: number;
+  maxPagesRead: number;
+  maxModelCalls: number;
+  maxScreenshots: number;
+  maxCostUsd: number;
+} {
+  switch (mode) {
+    case 'quick':
+      return { maxSearchRequests: 2, maxPagesRead: 3, maxModelCalls: 4, maxScreenshots: 0, maxCostUsd: 0.5 };
+    case 'deep':
+      return { maxSearchRequests: 30, maxPagesRead: 40, maxModelCalls: 20, maxScreenshots: 3, maxCostUsd: 2.0 };
+    default:
+      return { maxSearchRequests: 8, maxPagesRead: 12, maxModelCalls: 14, maxScreenshots: 1, maxCostUsd: 1.0 };
+  }
 }
 
 /**

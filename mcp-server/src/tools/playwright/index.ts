@@ -3,14 +3,26 @@ import { logger } from "../../../../lib/observability/logger.js";
 import { sanitizer } from "../../../../lib/security/input-sanitizer.js";
 import { retry } from "../../../../lib/resilience/retry.js";
 import { launchWithFallback } from "../../../../lib/browser-gateway/infrastructure/engines/playwright/launch-with-fallback.js";
+import { NetworkPolicy } from "../../../../lib/browser-gateway/application/network-policy.js";
+import { attachRequestGuard } from "../../../../lib/browser-gateway/infrastructure/engines/playwright/request-guard.js";
 import { setCurrentPage as setVisionPage } from "../vision/index.js";
 import { setCurrentPage as setSessionPage } from "../session/index.js";
 
 let browser: Browser | null = null;
-let context: BrowserContext | null = null;
-let page: Page | null = null;
 
-async function ensureBrowser() {
+/**
+ * Per-session browser contexts (AC18 / BLOCKER-1).
+ *
+ * Each sessionId gets its own isolated context + page so session A can never
+ * observe session B's cookies/storage/tabs. The legacy MCP tools use the
+ * `default` session; the Browser Gateway engine passes `task.sessionId` so
+ * every gateway session is isolated.
+ */
+const sessions = new Map<string, { context: BrowserContext; page: Page }>();
+
+const DEFAULT_SESSION = "default";
+
+async function ensureBrowser(sessionId: string = DEFAULT_SESSION) {
   if (!browser) {
     const headlessMode = process.env.HEADLESS !== "false";
     logger.info("Launching browser", {
@@ -27,33 +39,46 @@ async function ensureBrowser() {
       browserType: "chromium",
       headless: headlessMode,
     });
+  }
 
-    context = await browser.newContext({
+  let session = sessions.get(sessionId);
+  if (!session) {
+    const context = await browser.newContext({
       userAgent:
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
       viewport: { width: 1280, height: 720 },
       locale: "es-MX",
     });
 
-    page = await context.newPage();
+    const page = await context.newPage();
+    // HIGH-4: enforce the network policy on every request (redirects +
+    // subresources), not just the initial navigate URL.
+    attachRequestGuard(page);
+
+    session = { context, page };
+    sessions.set(sessionId, session);
+
     logger.info("New page created", {
+      sessionId,
       viewport: { width: 1280, height: 720 },
       locale: "es-MX",
     });
 
-    // Share page with vision and session tools
-    setVisionPage(page);
-    setSessionPage(page);
+    // Share the default page with vision and session tools (legacy single-user
+    // surface). Gateway sessions are NOT shared.
+    if (sessionId === DEFAULT_SESSION) {
+      setVisionPage(page);
+      setSessionPage(page);
+    }
   }
-  return { browser, context, page: page! };
+  return { browser, context: session.context, page: session.page };
 }
 
 async function closeBrowser() {
   if (browser) {
     await browser.close();
     browser = null;
-    context = null;
-    page = null;
+    sessions.clear();
   }
 }
 
@@ -61,12 +86,21 @@ async function closeBrowser() {
 // These back both the MCP tools and the Browser Gateway Playwright engine so
 // the shared browser/page lifecycle is preserved and no business logic is
 // duplicated. Input sanitization is always applied regardless of caller.
+// Each runner accepts an optional `sessionId` so the gateway can isolate
+// sessions (AC18). The network/SSRF policy is applied on navigate regardless
+// of caller (HIGH-3).
 
-export async function runNavigate(url: string, waitUntil: string = "load") {
+export async function runNavigate(url: string, waitUntil: string = "load", sessionId: string = DEFAULT_SESSION) {
   if (!sanitizer.validateURL(url)) {
     throw new Error("Invalid URL");
   }
-  const { page } = await ensureBrowser();
+  // HIGH-3: apply the same NetworkPolicy the gateway facade uses, so the
+  // legacy path is protected against private/loopback (SSRF) too.
+  const verdict = new NetworkPolicy().assess(url);
+  if (!verdict.ok) {
+    throw new Error(`navigation denied: ${verdict.reason}`);
+  }
+  const { page } = await ensureBrowser(sessionId);
   await retry.executeWithRetry(async () => {
     await page.goto(url, { waitUntil: waitUntil as any, timeout: 30000 });
   });
@@ -77,11 +111,11 @@ export async function runNavigate(url: string, waitUntil: string = "load") {
   };
 }
 
-export async function runClick(selector: string, timeout: number = 30000) {
+export async function runClick(selector: string, timeout: number = 30000, sessionId: string = DEFAULT_SESSION) {
   if (!sanitizer.validateSelector(selector)) {
     throw new Error("Invalid selector");
   }
-  const { page } = await ensureBrowser();
+  const { page } = await ensureBrowser(sessionId);
   await retry.executeWithRetry(async () => {
     await page.click(selector, { timeout });
   });
@@ -91,12 +125,13 @@ export async function runClick(selector: string, timeout: number = 30000) {
 export async function runFill(
   selector: string,
   value: string,
-  timeout: number = 30000
+  timeout: number = 30000,
+  sessionId: string = DEFAULT_SESSION
 ) {
   if (!sanitizer.validateSelector(selector)) {
     throw new Error("Invalid selector");
   }
-  const { page } = await ensureBrowser();
+  const { page } = await ensureBrowser(sessionId);
   await retry.executeWithRetry(async () => {
     await page.fill(selector, value, { timeout });
   });
@@ -105,8 +140,8 @@ export async function runFill(
   return { success: true, selector, filled: true };
 }
 
-export async function runScreenshot(path?: string, fullPage: boolean = false) {
-  const { page } = await ensureBrowser();
+export async function runScreenshot(path?: string, fullPage: boolean = false, sessionId: string = DEFAULT_SESSION) {
+  const { page } = await ensureBrowser(sessionId);
   const screenshotPath = path || `screenshots/screenshot-${Date.now()}.png`;
   const screenshot = await page.screenshot({
     path: screenshotPath,
@@ -119,11 +154,11 @@ export async function runScreenshot(path?: string, fullPage: boolean = false) {
   };
 }
 
-export async function runGetText(selector: string) {
+export async function runGetText(selector: string, sessionId: string = DEFAULT_SESSION) {
   if (!sanitizer.validateSelector(selector)) {
     throw new Error("Invalid selector");
   }
-  const { page } = await ensureBrowser();
+  const { page } = await ensureBrowser(sessionId);
   const text = await page.textContent(selector);
   return { success: true, selector, text };
 }
@@ -131,18 +166,19 @@ export async function runGetText(selector: string) {
 export async function runWaitFor(
   selector: string,
   timeout: number = 30000,
-  state: string = "visible"
+  state: string = "visible",
+  sessionId: string = DEFAULT_SESSION
 ) {
   if (!sanitizer.validateSelector(selector)) {
     throw new Error("Invalid selector");
   }
-  const { page } = await ensureBrowser();
+  const { page } = await ensureBrowser(sessionId);
   await page.waitForSelector(selector, { timeout, state: state as any });
   return { success: true, selector, state };
 }
 
-export async function runSnapshot() {
-  const { page } = await ensureBrowser();
+export async function runSnapshot(sessionId: string = DEFAULT_SESSION) {
+  const { page } = await ensureBrowser(sessionId);
   const title = await page.title();
   const url = page.url();
   const bodyText = (await page.evaluate(() => document.body?.innerText ?? ''))
@@ -150,8 +186,8 @@ export async function runSnapshot() {
   return { success: true, title, url, bodyText };
 }
 
-export async function runExtract(selector?: string) {
-  const { page } = await ensureBrowser();
+export async function runExtract(selector?: string, sessionId: string = DEFAULT_SESSION) {
+  const { page } = await ensureBrowser(sessionId);
   if (selector) {
     if (!sanitizer.validateSelector(selector)) {
       throw new Error("Invalid selector");

@@ -1,4 +1,5 @@
 import type { BrowserAction, BrowserTask } from '../domain/browser-task.js';
+import type { ApprovalRegistry } from './approval-registry.js';
 
 /**
  * Safety / approval gate — engine independent.
@@ -11,7 +12,9 @@ import type { BrowserAction, BrowserTask } from '../domain/browser-task.js';
  * External side-effect actions have an irreversible real-world effect:
  * submitting a form that transmits data, sending a message, publishing
  * content, or a purchase/destructive change. Such actions require an explicit
- * approval token (`task.approval.approved === true`).
+ * approval token issued by a trusted authority (AC19/AC16). A bare
+ * `task.approval.approved === true` supplied by the untrusted caller is NEVER
+ * accepted — the token must be verified against the ApprovalRegistry.
  */
 
 // Action types that are pure read-only / reversible observations.
@@ -41,9 +44,14 @@ function isExternalSideEffect(
 }
 
 export class SafetyGate {
+  private readonly approvalRegistry: ApprovalRegistry | undefined;
+
   constructor(
     private readonly requireApprovalForSideEffects: boolean = true,
-  ) {}
+    approvalRegistry?: ApprovalRegistry,
+  ) {
+    this.approvalRegistry = approvalRegistry;
+  }
 
   assess(task: BrowserTask): SafetyVerdict {
     const irreversible = isExternalSideEffect(
@@ -58,16 +66,28 @@ export class SafetyGate {
       };
     }
 
-    if (task.approval?.approved === true) {
-      return {
-        status: 'allowed',
-        reason: `${task.action.type} is a side-effect action with an explicit approval token`,
-      };
+    // A caller-supplied `approved: true` is NOT trusted. Only a token issued
+    // by the ApprovalRegistry for this exact task/action authorizes execution.
+    if (this.approvalRegistry && task.approval?.approvalId && task.approval.signature) {
+      const ok = this.approvalRegistry.verify(
+        { approvalId: task.approval.approvalId, signature: task.approval.signature },
+        {
+          taskId: task.taskId,
+          sessionId: task.sessionId,
+          actionType: task.action.type,
+        },
+      );
+      if (ok) {
+        return {
+          status: 'allowed',
+          reason: `${task.action.type} is a side-effect action with a verified approval token`,
+        };
+      }
     }
 
     return {
       status: 'approval_required',
-      reason: `${task.action.type} is an external side-effect action and requires explicit approval`,
+      reason: `${task.action.type} is an external side-effect action and requires a registry-issued approval token`,
     };
   }
 }

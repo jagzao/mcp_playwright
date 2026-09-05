@@ -1,6 +1,7 @@
 import { BrowserGateway, type GatewayOptions } from '../application/browser-gateway.js';
 import { BrowserHost, type BrowserHostOptions } from '../application/browser-host.js';
 import { LlmOperatorRouter } from '../application/llm-operator-router.js';
+import { HmacApprovalRegistry } from '../application/approval-registry.js';
 import { ObscuraEngine } from './engines/obscura/obscura-engine.js';
 import { PlaywrightEngine } from './engines/playwright/playwright-engine.js';
 import { PlaywrightBrowserRuntime } from './engines/playwright/playwright-browser-runtime.js';
@@ -32,6 +33,7 @@ export function createGateway(overrides?: Partial<GatewayOptions>): BrowserGatew
     llmRouter,
     requireApprovalForSideEffects:
       process.env.BROWSER_REQUIRE_APPROVAL_FOR_SIDE_EFFECTS !== 'false',
+    approvalRegistry: new HmacApprovalRegistry(),
   };
 
   if (overrides?.safetyGate) options.safetyGate = overrides.safetyGate;
@@ -53,7 +55,12 @@ export function createGateway(overrides?: Partial<GatewayOptions>): BrowserGatew
  * `persistAuth` hook is wired so durable auth state is persisted encrypted
  * after a successful human login.
  */
-export function createBrowserHost(overrides?: Partial<BrowserHostOptions>): BrowserHost {
+export function createBrowserHost(
+  overrides?: Partial<BrowserHostOptions> & {
+    /** Map a browser sessionId to a registered profileId for durable-auth persistence. */
+    profileForSession?: (sessionId: string) => string | undefined;
+  },
+): BrowserHost {
   const runtime = overrides?.runtime ?? new PlaywrightBrowserRuntime();
   const options: BrowserHostOptions = {
     runtime,
@@ -64,7 +71,13 @@ export function createBrowserHost(overrides?: Partial<BrowserHostOptions>): Brow
   } else {
     const vault = createSessionVault();
     if (vault) {
-      const persistAuth = new SessionVaultPersistAuth(vault, runtime, (sessionId) => sessionId);
+      // Default mapping: a sessionId that matches a registered profileId maps
+      // to itself. Callers may inject a richer sessionId->profileId mapping via
+      // `profileForSession` (e.g. host sessions registered as profiles).
+      const profileForSession =
+        overrides?.profileForSession ??
+        ((sessionId: string) => (vault.getProfile(sessionId) ? sessionId : undefined));
+      const persistAuth = new SessionVaultPersistAuth(vault, runtime, profileForSession);
       options.persistAuth = persistAuth.persistAuth;
     }
   }

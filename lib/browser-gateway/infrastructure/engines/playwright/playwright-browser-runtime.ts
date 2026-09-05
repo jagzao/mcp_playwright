@@ -2,6 +2,7 @@ import { type Browser, type BrowserContext, type Page } from 'playwright';
 import type { BrowserRuntime } from '../../../domain/browser-runtime.js';
 import type { BrowserEngineId } from '../../../domain/browser-result.js';
 import { launchWithFallback } from './launch-with-fallback.js';
+import { attachRequestGuard } from './request-guard.js';
 
 interface LiveSession {
   browser: Browser;
@@ -39,6 +40,9 @@ export class PlaywrightBrowserRuntime implements BrowserRuntime {
       locale: 'es-MX',
     });
     const page = await context.newPage();
+    // HIGH-4: enforce the network policy on every request (redirects +
+    // subresources), not just the initial navigate URL.
+    attachRequestGuard(page);
     this.sessions.set(sessionId, { browser, context, page });
   }
 

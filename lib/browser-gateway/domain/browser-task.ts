@@ -17,6 +17,8 @@ export interface BrowserTask {
   approval?: {
     approved: boolean;
     approvalId?: string;
+    /** Opaque signature issued by the ApprovalRegistry (AC19). */
+    signature?: string;
   };
   metadata?: Record<string, string>;
 }

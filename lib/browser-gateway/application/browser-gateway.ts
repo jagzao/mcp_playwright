@@ -8,6 +8,7 @@ import type { GatewaySession, GatewaySessionStatus } from '../domain/browser-ses
 import { BrowserEngineRouter } from './browser-engine-router.js';
 import { SafetyGate } from './safety-gate.js';
 import { NetworkPolicy } from './network-policy.js';
+import { HmacApprovalRegistry, type ApprovalRegistry } from './approval-registry.js';
 import { LlmOperatorRouter, type LlmRoutingSelection } from './llm-operator-router.js';
 import { defaultTelemetry, type Telemetry } from './telemetry.js';
 
@@ -34,6 +35,8 @@ export interface GatewayOptions {
   networkPolicy?: NetworkPolicy;
   telemetry?: Telemetry;
   requireApprovalForSideEffects?: boolean;
+  /** Registry that issues/verifies approval tokens (AC19). */
+  approvalRegistry?: ApprovalRegistry;
 }
 
 export interface GatewayCapabilities {
@@ -51,7 +54,10 @@ export class BrowserGateway {
   constructor(private readonly options: GatewayOptions) {
     this.safetyGate =
       options.safetyGate ??
-      new SafetyGate(options.requireApprovalForSideEffects ?? true);
+      new SafetyGate(
+        options.requireApprovalForSideEffects ?? true,
+        options.approvalRegistry ?? new HmacApprovalRegistry(),
+      );
     this.networkPolicy = options.networkPolicy ?? new NetworkPolicy();
     this.telemetry = options.telemetry ?? defaultTelemetry;
     this.router = new BrowserEngineRouter(options.primaryEngine, options.fallbackEngine);
@@ -251,4 +257,5 @@ export class BrowserGateway {
   }
 }
 
-export { NetworkPolicy, SafetyGate, LlmOperatorRouter };
+export { NetworkPolicy, SafetyGate, LlmOperatorRouter, HmacApprovalRegistry };
+export type { ApprovalRegistry };

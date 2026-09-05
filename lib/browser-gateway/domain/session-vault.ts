@@ -54,7 +54,16 @@ export interface SessionProfile {
   profileId: string;
   /** Domains this profile is allowed to operate on. */
   allowedDomains: string[];
-  /** Which agents/projects may request this profile. */
+  /**
+   * Which agents/projects may request this profile.
+   *
+   * NOTE (out-of-scope): this field is currently NOT enforced. Enforcing it
+   * requires a trusted caller identity to be threaded through the vault entry
+   * points (bootstrap/validate/persist/resolveArtifact), which does not exist
+   * yet in the MCP/CLI transport layer. Until a caller-identity mechanism is
+   * introduced, treat this as documentation of intent only. See the security
+   * review finding MEDIUM-7.
+   */
   allowedCallers?: string[];
   permissions?: SessionProfilePermissions;
   /** Prefer manual interactive login bootstrap over exposing credentials. */

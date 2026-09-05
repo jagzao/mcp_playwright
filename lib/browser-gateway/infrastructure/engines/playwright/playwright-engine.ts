@@ -42,7 +42,8 @@ export class PlaywrightEngine implements BrowserEngine {
   readonly id: BrowserEngineId = 'playwright';
 
   async createSession(sessionId: string): Promise<void> {
-    // Session is lazily created on first navigation via the shared ensureBrowser().
+    // Session is lazily created on first navigation via the per-session
+    // context in the shared runner (keyed by sessionId).
     return;
   }
 
@@ -75,24 +76,27 @@ export class PlaywrightEngine implements BrowserEngine {
 
     try {
       let data: unknown;
+      // Route every action through the per-session context keyed by
+      // task.sessionId so gateway sessions are isolated (AC18 / BLOCKER-1).
+      const sessionId = task.sessionId;
       switch (task.action.type) {
         case 'navigate':
-          data = await runNavigate(task.action.url);
+          data = await runNavigate(task.action.url, 'load', sessionId);
           break;
         case 'snapshot':
-          data = await runSnapshot();
+          data = await runSnapshot(sessionId);
           break;
         case 'click':
-          data = await runClick(task.action.target);
+          data = await runClick(task.action.target, 30000, sessionId);
           break;
         case 'fill':
-          data = await runFill(task.action.target, task.action.value);
+          data = await runFill(task.action.target, task.action.value, 30000, sessionId);
           break;
         case 'extract':
-          data = await runExtract(task.action.selector);
+          data = await runExtract(task.action.selector, sessionId);
           break;
         case 'screenshot':
-          data = await runScreenshot(undefined, task.action.fullPage);
+          data = await runScreenshot(undefined, task.action.fullPage, sessionId);
           break;
         default:
           return {
