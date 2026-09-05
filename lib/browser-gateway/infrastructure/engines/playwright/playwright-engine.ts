@@ -8,7 +8,7 @@ import {
   runFill,
   runExtract,
   runScreenshot,
-  runClose,
+  runCloseSession,
 } from '../../../../../mcp-server/src/tools/playwright/index.js';
 
 /**
@@ -48,7 +48,10 @@ export class PlaywrightEngine implements BrowserEngine {
   }
 
   async closeSession(sessionId: string): Promise<void> {
-    await runClose();
+    // Close ONLY this session's context/page, leaving other sessions isolated
+    // (AC18 / BLOCKER-1). `runClose()` would tear down the whole browser and
+    // every session, which breaks per-session isolation.
+    await runCloseSession(sessionId);
   }
 
   async health(): Promise<BrowserEngineHealth> {

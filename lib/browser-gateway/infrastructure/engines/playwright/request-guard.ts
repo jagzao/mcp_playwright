@@ -18,11 +18,18 @@ export function attachRequestGuard(
   policy: NetworkPolicy = new NetworkPolicy(),
 ): (route: Route) => void {
   const handler = (route: Route): void => {
-    const verdict = policy.assess(route.request().url());
-    if (!verdict.ok) {
-      route.abort().catch(() => undefined);
-    } else {
-      route.continue().catch(() => undefined);
+    try {
+      const verdict = policy.assess(route.request().url());
+      if (!verdict.ok) {
+        route.abort().catch(() => undefined);
+      } else {
+        route.continue().catch(() => undefined);
+      }
+    } catch {
+      // The page/context/browser may have been closed while this route handler
+      // was pending (e.g. host.closeAll() during teardown). Playwright throws
+      // "Target page, context or browser has been closed" in that case. Swallow
+      // it so it never surfaces as an unhandled rejection.
     }
   };
   page.route('**/*', handler);

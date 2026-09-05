@@ -82,6 +82,25 @@ async function closeBrowser() {
   }
 }
 
+/**
+ * Close ONLY the given session's context and remove just that entry from the
+ * `sessions` map (AC18 / BLOCKER-1). Other sessions' contexts/pages are left
+ * untouched so closing one gateway session never destroys another session's
+ * isolation. If this was the last session, the shared browser is also closed
+ * as an optimization.
+ */
+async function closeSession(sessionId: string = DEFAULT_SESSION) {
+  const session = sessions.get(sessionId);
+  if (session) {
+    await session.context.close();
+    sessions.delete(sessionId);
+  }
+  if (sessions.size === 0 && browser) {
+    await browser.close();
+    browser = null;
+  }
+}
+
 // --- Reusable runner functions ---------------------------------------------
 // These back both the MCP tools and the Browser Gateway Playwright engine so
 // the shared browser/page lifecycle is preserved and no business logic is
@@ -201,6 +220,16 @@ export async function runExtract(selector?: string, sessionId: string = DEFAULT_
 
 export async function runClose() {
   await closeBrowser();
+  return { success: true };
+}
+
+/**
+ * Per-session close: closes ONLY the given session's context and removes just
+ * that entry from the `sessions` map. Other sessions remain isolated (AC18).
+ * Used by the Browser Gateway engine's `closeSession(sessionId)`.
+ */
+export async function runCloseSession(sessionId: string = DEFAULT_SESSION) {
+  await closeSession(sessionId);
   return { success: true };
 }
 
