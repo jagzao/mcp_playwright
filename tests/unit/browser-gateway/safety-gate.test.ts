@@ -116,4 +116,70 @@ describe('SafetyGate (US-001)', () => {
       expect(verdict.status).toBe('approval_required');
     });
   });
+
+  describe('HIGH-B: caller cannot downgrade an irreversible click', () => {
+    const sideEffectTargets = ['#publish', '#buy', '#submit', '#delete', '#send', '#purchase', '#checkout', '#transfer'];
+    const readTargets = ['#next', '#nav-home', 'a[href="/docs"]', '.pagination', '#expand'];
+
+    it('a raw click WITHOUT sideEffect on a side-effect-like target is approval_required (fail-safe)', () => {
+      const gate = new SafetyGate(true);
+      for (const target of sideEffectTargets) {
+        // @ts-expect-error — intentionally omit the optional sideEffect to prove the
+        // trusted ClickPolicy still catches the irreversible target.
+        const verdict = gate.assess(task({ type: 'click', target }));
+        expect(verdict.status, `.assess #${target} omitted`).toBe('approval_required');
+      }
+    });
+
+    it('a caller cannot bypass by setting sideEffect:"read" on a side-effect-like target (policy overrides flag)', () => {
+      const gate = new SafetyGate(true);
+      for (const target of sideEffectTargets) {
+        const verdict = gate.assess(
+          task({ type: 'click', target, sideEffect: 'read' }),
+        );
+        expect(verdict.status, `.assess #${target} read-flag`).toBe('approval_required');
+      }
+    });
+
+    it('a caller cannot bypass by omitting sideEffect even with a bare approved:true', () => {
+      const registry = new HmacApprovalRegistry('test-secret');
+      const gate = new SafetyGate(true, registry);
+      // @ts-expect-error — intentionally omit sideEffect.
+      const verdict = gate.assess(
+        task({ type: 'click', target: '#publish' }, { approved: true, approvalId: 'a-1' }),
+      );
+      expect(verdict.status).toBe('approval_required');
+    });
+
+    it('a genuinely reversible / navigation click stays auto-allowed (ergonomic path preserved)', () => {
+      const gate = new SafetyGate(true);
+      for (const target of readTargets) {
+        // @ts-expect-error — no sideEffect, reversible target stays auto-allowed.
+        expect(gate.assess(task({ type: 'click', target })).status).toBe('allowed');
+      }
+    });
+
+    it('benign reversible UI controls are auto-allowed (not irreversible side effects)', () => {
+      const gate = new SafetyGate(true);
+      const benignTargets = ['#clear-filters', '#reset-form', '#apply-filters', '#accept-cookies', '#drop-down', '#register'];
+      for (const target of benignTargets) {
+        // @ts-expect-error — no sideEffect, benign reversible control stays auto-allowed.
+        expect(gate.assess(task({ type: 'click', target })).status, `.assess #${target}`).toBe('allowed');
+      }
+    });
+
+    it('an approved side-effect click WITH a registry-issued token still executes', () => {
+      const registry = new HmacApprovalRegistry('test-secret');
+      const gate = new SafetyGate(true, registry);
+      // @ts-expect-error — no sideEffect, but ClickPolicy blocks; token must clear it.
+      const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'click' });
+      const verdict = gate.assess(
+        task(
+          { type: 'click', target: '#publish' },
+          { approved: true, approvalId: token.approvalId, signature: token.signature },
+        ),
+      );
+      expect(verdict.status).toBe('allowed');
+    });
+  });
 });

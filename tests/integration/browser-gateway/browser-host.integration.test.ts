@@ -164,4 +164,77 @@ describe('BrowserHost persistent lifecycle + HITL (integration)', () => {
       await host.closeAll();
     }
   });
+
+  it('HIGH-A: restoreAuthState is origin-scoped — no cross-origin localStorage contamination, correct per-origin restore', async () => {
+    if (!(await browserAvailable())) {
+      console.warn('SKIP: Playwright browser not installed. Run `npx playwright install` to enable.');
+      return;
+    }
+
+    const runtime = new PlaywrightBrowserRuntime();
+    const host = new BrowserHost({ runtime });
+
+    try {
+      // 1) Open a session and seed DISTINCT localStorage on two different origins.
+      await host.createSession('it-origins', { headed: false });
+
+      // Origin A (example.com) holds token A.
+      await runtime.getPage('it-origins')!.goto('https://example.com', { waitUntil: 'domcontentloaded' });
+      await runtime.getPage('it-origins')!.evaluate(() => {
+        window.localStorage.setItem('session_token', 'origin-a-token');
+        window.localStorage.setItem('user', 'alice');
+      });
+
+      // Origin B (example.org) holds token B.
+      await runtime.getPage('it-origins')!.goto('https://example.org', { waitUntil: 'domcontentloaded' });
+      await runtime.getPage('it-origins')!.evaluate(() => {
+        window.localStorage.setItem('session_token', 'origin-b-token');
+        window.localStorage.setItem('lang', 'en');
+      });
+
+      // 2) Capture the full storageState — both origins and their localStorage.
+      const captured = await runtime.captureAuthState('it-origins');
+      expect(captured).toBeDefined();
+      const storage = captured as { origins: Array<{ origin: string; localStorage: Array<{ name: string; value: string }> }> };
+      const originSet = new Set(storage.origins.map((o) => o.origin));
+      expect(originSet.has('https://example.com')).toBe(true);
+      expect(originSet.has('https://example.org')).toBe(true);
+
+      // 3) Simulate promotion: close, reopen, restore.
+      await runtime.closeSession('it-origins');
+      await runtime.openSession('it-origins', { headed: true });
+      await runtime.restoreAuthState('it-origins', captured);
+
+      // 4) Visit origin A: only A's values present; B's values ABSENT (no contamination).
+      await runtime.getPage('it-origins')!.goto('https://example.com', { waitUntil: 'domcontentloaded' });
+      const a = await runtime.getPage('it-origins')!.evaluate(() => ({
+        token: window.localStorage.getItem('session_token'),
+        user: window.localStorage.getItem('user'),
+        lang: window.localStorage.getItem('lang'),
+      }));
+      expect(a.token).toBe('origin-a-token');
+      expect(a.user).toBe('alice');
+      // B's language flag must NOT leak into A.
+      expect(a.lang).toBeNull();
+
+      // 5) Visit origin B: only B's values present; A's values ABSENT.
+      await runtime.getPage('it-origins')!.goto('https://example.org', { waitUntil: 'domcontentloaded' });
+      const b = await runtime.getPage('it-origins')!.evaluate(() => ({
+        token: window.localStorage.getItem('session_token'),
+        lang: window.localStorage.getItem('lang'),
+        user: window.localStorage.getItem('user'),
+      }));
+      expect(b.token).toBe('origin-b-token');
+      expect(b.lang).toBe('en');
+      // A's user must NOT leak into B.
+      expect(b.user).toBeNull();
+
+      // 6) Re-visiting A still yields A's values (per-origin restoration is stable).
+      await runtime.getPage('it-origins')!.goto('https://example.com', { waitUntil: 'domcontentloaded' });
+      const a2 = await runtime.getPage('it-origins')!.evaluate(() => window.localStorage.getItem('session_token'));
+      expect(a2).toBe('origin-a-token');
+    } finally {
+      await host.closeAll();
+    }
+  });
 });

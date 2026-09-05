@@ -289,4 +289,85 @@ describe('BrowserGateway facade (US-001)', () => {
     expect(result.status).toBe('success');
     expect(primary.executeCalls).toBe(1);
   });
+
+  describe('HIGH-B: gateway-level, caller cannot downgrade an irreversible click', () => {
+    it('a raw click WITHOUT sideEffect on a side-effect-like target is blocked (no engine runs)', async () => {
+      const primary = new FakeEngine('obscura', success('obscura'));
+      const fallback = new FakeEngine('playwright', success('playwright'));
+      const telemetry = new CapturingTelemetry();
+      const registry = new HmacApprovalRegistry('test-secret');
+      const gateway = buildGateway(primary, fallback, telemetry, { approvalRegistry: registry });
+
+      // @ts-expect-error — intentionally omit sideEffect on an irreversible target.
+      const blocked = await gateway.executeTask(task({ action: { type: 'click', target: '#publish' } }));
+      expect(blocked.status).toBe('blocked');
+      if (blocked.status === 'blocked') {
+        expect(blocked.category).toBe('approval_required');
+      }
+      // The gate refuses before any engine is consulted — no bypass via fallback.
+      expect(primary.executeCalls).toBe(0);
+      expect(fallback.executeCalls).toBe(0);
+    });
+
+    it('a caller cannot bypass by setting sideEffect:"read" on an irreversible target', async () => {
+      const primary = new FakeEngine('obscura', success('obscura'));
+      const fallback = new FakeEngine('playwright', success('playwright'));
+      const telemetry = new CapturingTelemetry();
+      const gateway = buildGateway(primary, fallback, telemetry);
+
+      const blocked = await gateway.executeTask(
+        task({ action: { type: 'click', target: '#delete', sideEffect: 'read' } as BrowserTask['action'] }),
+      );
+      expect(blocked.status).toBe('blocked');
+    });
+
+    it('a raw irreversible click is blocked even when the primary would fail and fall back', async () => {
+      const primary = new FakeEngine('obscura', failure('obscura', 'provider_unavailable'));
+      const fallback = new FakeEngine('playwright', success('playwright'));
+      const telemetry = new CapturingTelemetry();
+      const gateway = buildGateway(primary, fallback, telemetry);
+
+      // @ts-expect-error — omit sideEffect on irreversible target.
+      const blocked = await gateway.executeTask(task({ action: { type: 'click', target: '#send' } }));
+      expect(blocked.status).toBe('blocked');
+      if (blocked.status === 'blocked') {
+        expect(blocked.category).toBe('approval_required');
+      }
+      // Neither primary nor fallback is reached — the gate blocks first.
+      expect(primary.executeCalls).toBe(0);
+      expect(fallback.executeCalls).toBe(0);
+    });
+
+    it('an irreversible click WITH a registry-issued token still executes (approved path functional)', async () => {
+      const primary = new FakeEngine('obscura', success('obscura'));
+      const fallback = new FakeEngine('playwright', success('playwright'));
+      const telemetry = new CapturingTelemetry();
+      const registry = new HmacApprovalRegistry('test-secret');
+      const gateway = buildGateway(primary, fallback, telemetry, { approvalRegistry: registry });
+
+      const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'click' });
+      // @ts-expect-error — omit sideEffect; token is the trusted approval that clears it.
+      const approved = await gateway.executeTask(
+        task({
+          action: { type: 'click', target: '#buy' },
+          approval: { approved: true, approvalId: token.approvalId, signature: token.signature },
+        }),
+      );
+      expect(approved.status).toBe('success');
+      expect(primary.executeCalls).toBe(1);
+    });
+
+    it('a reversible/navigation click with an explicit sideEffect:"read" stays auto-allowed', async () => {
+      const primary = new FakeEngine('obscura', success('obscura'));
+      const fallback = new FakeEngine('playwright', success('playwright'));
+      const telemetry = new CapturingTelemetry();
+      const gateway = buildGateway(primary, fallback, telemetry);
+
+      const result = await gateway.executeTask(
+        task({ action: { type: 'click', target: '#next', sideEffect: 'read' } }),
+      );
+      expect(result.status).toBe('success');
+      expect(primary.executeCalls).toBe(1);
+    });
+  });
 });

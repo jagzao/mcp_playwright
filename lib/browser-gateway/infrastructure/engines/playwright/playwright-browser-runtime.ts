@@ -117,25 +117,38 @@ export class PlaywrightBrowserRuntime implements BrowserRuntime {
       await live.context.addCookies(cookies);
     }
 
-    // Restore localStorage per origin. The host navigates back to the original
-    // URL after restore, so seed each captured origin's localStorage via
-    // addInitScript — it runs before the page scripts on every navigation,
-    // guaranteeing SPA/localStorage-backed auth survives the promotion.
+    // Restore localStorage per origin (HIGH-A). Each captured origin's
+    // localStorage is seeded via addInitScript that runs on every navigation in
+    // the context. Because a single context can navigate across multiple
+    // origins (multi-origin OAuth/login flows: Microsoft/Google/Facebook/etc.),
+    // the script MUST scope itself to the captured origin: it clears/writes
+    // localStorage ONLY when the current page/frame origin matches the captured
+    // origin. This prevents origin A's values from being injected into origin
+    // B's localStorage (cross-origin confidentiality/integrity) and never
+    // clears an unrelated origin's storage.
     const origins = storage.origins ?? [];
     for (const origin of origins) {
       const entries = origin.localStorage ?? [];
       if (entries.length === 0) continue;
+      if (!origin.origin) continue;
+      const capturedOrigin = origin.origin;
       const seed = Object.fromEntries(entries.map((e) => [e.name, e.value]));
-      await live.context.addInitScript((data) => {
-        try {
-          window.localStorage.clear();
-          for (const [key, value] of Object.entries(data)) {
-            window.localStorage.setItem(key, value);
+      await live.context.addInitScript(
+        (data) => {
+          try {
+            const dataObj = data as { capturedOrigin: string; seed: Record<string, string> };
+            // Scope to the captured origin only — never touch unrelated origins.
+            if (window.location.origin !== dataObj.capturedOrigin) return;
+            window.localStorage.clear();
+            for (const [key, value] of Object.entries(dataObj.seed)) {
+              window.localStorage.setItem(key, value);
+            }
+          } catch {
+            // Origin not yet loaded / storage unavailable — best-effort seed.
           }
-        } catch {
-          // Origin not yet loaded / storage unavailable — best-effort seed.
-        }
-      }, seed);
+        },
+        { capturedOrigin, seed },
+      );
     }
   }
 
