@@ -8,6 +8,7 @@
     "postinstall": "tsx scripts/post-install.ts",
     "init": "bash scripts/init.sh",
     "diagnose": "tsx scripts/diagnose.ts",
+    "smoke:gateway": "tsx scripts/gateway-smoke.ts",
     "build": "tsc -b tsconfig.json",
     "dev": "tsx watch console-client/src/index.ts",
     "start": "node dist/console-client/src/index.js",

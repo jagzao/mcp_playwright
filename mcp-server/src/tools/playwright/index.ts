@@ -1,7 +1,8 @@
-import { chromium, Browser, Page, BrowserContext } from "playwright";
+import { Browser, Page, BrowserContext } from "playwright";
 import { logger } from "../../../../lib/observability/logger.js";
 import { sanitizer } from "../../../../lib/security/input-sanitizer.js";
 import { retry } from "../../../../lib/resilience/retry.js";
+import { launchWithFallback } from "../../../../lib/browser-gateway/infrastructure/engines/playwright/launch-with-fallback.js";
 import { setCurrentPage as setVisionPage } from "../vision/index.js";
 import { setCurrentPage as setSessionPage } from "../session/index.js";
 
@@ -17,7 +18,7 @@ async function ensureBrowser() {
       headlessEnv: process.env.HEADLESS,
     });
 
-    browser = await chromium.launch({
+    browser = await launchWithFallback({
       headless: headlessMode,
       args: ["--disable-blink-features=AutomationControlled"],
     });
@@ -56,6 +57,119 @@ async function closeBrowser() {
   }
 }
 
+// --- Reusable runner functions ---------------------------------------------
+// These back both the MCP tools and the Browser Gateway Playwright engine so
+// the shared browser/page lifecycle is preserved and no business logic is
+// duplicated. Input sanitization is always applied regardless of caller.
+
+export async function runNavigate(url: string, waitUntil: string = "load") {
+  if (!sanitizer.validateURL(url)) {
+    throw new Error("Invalid URL");
+  }
+  const { page } = await ensureBrowser();
+  await retry.executeWithRetry(async () => {
+    await page.goto(url, { waitUntil: waitUntil as any, timeout: 30000 });
+  });
+  return {
+    success: true,
+    url: page.url(),
+    title: await page.title(),
+  };
+}
+
+export async function runClick(selector: string, timeout: number = 30000) {
+  if (!sanitizer.validateSelector(selector)) {
+    throw new Error("Invalid selector");
+  }
+  const { page } = await ensureBrowser();
+  await retry.executeWithRetry(async () => {
+    await page.click(selector, { timeout });
+  });
+  return { success: true, selector };
+}
+
+export async function runFill(
+  selector: string,
+  value: string,
+  timeout: number = 30000
+) {
+  if (!sanitizer.validateSelector(selector)) {
+    throw new Error("Invalid selector");
+  }
+  const { page } = await ensureBrowser();
+  await retry.executeWithRetry(async () => {
+    await page.fill(selector, value, { timeout });
+  });
+  // Never return or log the raw filled value: it may contain credentials
+  // or form secrets. Only report that the fill succeeded.
+  return { success: true, selector, filled: true };
+}
+
+export async function runScreenshot(path?: string, fullPage: boolean = false) {
+  const { page } = await ensureBrowser();
+  const screenshotPath = path || `screenshots/screenshot-${Date.now()}.png`;
+  const screenshot = await page.screenshot({
+    path: screenshotPath,
+    fullPage,
+  });
+  return {
+    success: true,
+    path: screenshotPath,
+    size: screenshot.length,
+  };
+}
+
+export async function runGetText(selector: string) {
+  if (!sanitizer.validateSelector(selector)) {
+    throw new Error("Invalid selector");
+  }
+  const { page } = await ensureBrowser();
+  const text = await page.textContent(selector);
+  return { success: true, selector, text };
+}
+
+export async function runWaitFor(
+  selector: string,
+  timeout: number = 30000,
+  state: string = "visible"
+) {
+  if (!sanitizer.validateSelector(selector)) {
+    throw new Error("Invalid selector");
+  }
+  const { page } = await ensureBrowser();
+  await page.waitForSelector(selector, { timeout, state: state as any });
+  return { success: true, selector, state };
+}
+
+export async function runSnapshot() {
+  const { page } = await ensureBrowser();
+  const title = await page.title();
+  const url = page.url();
+  const bodyText = (await page.evaluate(() => document.body?.innerText ?? ''))
+    .slice(0, 4000);
+  return { success: true, title, url, bodyText };
+}
+
+export async function runExtract(selector?: string) {
+  const { page } = await ensureBrowser();
+  if (selector) {
+    if (!sanitizer.validateSelector(selector)) {
+      throw new Error("Invalid selector");
+    }
+    const text = await page.textContent(selector);
+    return { success: true, text };
+  }
+  const text = await page.evaluate(() => document.body?.innerText ?? '');
+  return { success: true, text };
+}
+
+export async function runClose() {
+  await closeBrowser();
+  return { success: true };
+}
+
+// --- MCP tool definitions (backward compatible) -----------------------------
+
 export const playwrightTools = [
   {
     name: "playwright_navigate",
@@ -72,24 +186,8 @@ export const playwrightTools = [
       },
       required: ["url"],
     },
-    async execute(args: any) {
-      const { url, waitUntil = "load" } = args;
-
-      if (!sanitizer.validateURL(url)) {
-        throw new Error("Invalid URL");
-      }
-
-      const { page } = await ensureBrowser();
-
-      await retry.executeWithRetry(async () => {
-        await page.goto(url, { waitUntil: waitUntil as any, timeout: 30000 });
-      });
-
-      return {
-        success: true,
-        url: page.url(),
-        title: await page.title(),
-      };
+    execute(args: any) {
+      return runNavigate(args.url, args.waitUntil);
     },
   },
 
@@ -107,20 +205,8 @@ export const playwrightTools = [
       },
       required: ["selector"],
     },
-    async execute(args: any) {
-      const { selector, timeout = 30000 } = args;
-
-      if (!sanitizer.validateSelector(selector)) {
-        throw new Error("Invalid selector");
-      }
-
-      const { page } = await ensureBrowser();
-
-      await retry.executeWithRetry(async () => {
-        await page.click(selector, { timeout });
-      });
-
-      return { success: true, selector };
+    execute(args: any) {
+      return runClick(args.selector, args.timeout);
     },
   },
 
@@ -139,47 +225,8 @@ export const playwrightTools = [
       },
       required: ["selector", "value"],
     },
-    async execute(args: any) {
-      const { selector, value, timeout = 30000 } = args;
-
-      if (!sanitizer.validateSelector(selector)) {
-        throw new Error("Invalid selector");
-      }
-
-      // Replace environment variables in fill values
-      let fillValue = value;
-      let usedCredentials = false;
-
-      if (fillValue && fillValue.includes("${LINKEDIN_EMAIL}")) {
-        fillValue = fillValue.replace(
-          "${LINKEDIN_EMAIL}",
-          process.env.LINKEDIN_EMAIL || ""
-        );
-        usedCredentials = true;
-        logger.info("Using LinkedIn email from environment variables", {
-          email: process.env.LINKEDIN_EMAIL
-            ? "***" + process.env.LINKEDIN_EMAIL.slice(-4)
-            : "NOT_SET",
-        });
-      }
-      if (fillValue && fillValue.includes("${LINKEDIN_PASSWORD}")) {
-        fillValue = fillValue.replace(
-          "${LINKEDIN_PASSWORD}",
-          process.env.LINKEDIN_PASSWORD || ""
-        );
-        usedCredentials = true;
-        logger.info("Using LinkedIn password from environment variables", {
-          password: process.env.LINKEDIN_PASSWORD ? "***SET***" : "NOT_SET",
-        });
-      }
-
-      const { page } = await ensureBrowser();
-
-      await retry.executeWithRetry(async () => {
-        await page.fill(selector, fillValue, { timeout });
-      });
-
-      return { success: true, selector, value: fillValue, usedCredentials };
+    execute(args: any) {
+      return runFill(args.selector, args.value, args.timeout);
     },
   },
 
@@ -193,23 +240,8 @@ export const playwrightTools = [
         fullPage: { type: "boolean", description: "Capture full page" },
       },
     },
-    async execute(args: any) {
-      const { path, fullPage = false } = args;
-      const { page } = await ensureBrowser();
-
-      // Generate default path if not provided
-      const screenshotPath = path || `screenshots/screenshot-${Date.now()}.png`;
-
-      const screenshot = await page.screenshot({
-        path: screenshotPath,
-        fullPage,
-      });
-
-      return {
-        success: true,
-        path: screenshotPath,
-        size: screenshot.length,
-      };
+    execute(args: any) {
+      return runScreenshot(args.path, args.fullPage);
     },
   },
 
@@ -223,18 +255,8 @@ export const playwrightTools = [
       },
       required: ["selector"],
     },
-    async execute(args: any) {
-      const { selector } = args;
-
-      if (!sanitizer.validateSelector(selector)) {
-        throw new Error("Invalid selector");
-      }
-
-      const { page } = await ensureBrowser();
-
-      const text = await page.textContent(selector);
-
-      return { success: true, selector, text };
+    execute(args: any) {
+      return runGetText(args.selector);
     },
   },
 
@@ -254,18 +276,8 @@ export const playwrightTools = [
       },
       required: ["selector"],
     },
-    async execute(args: any) {
-      const { selector, timeout = 30000, state = "visible" } = args;
-
-      if (!sanitizer.validateSelector(selector)) {
-        throw new Error("Invalid selector");
-      }
-
-      const { page } = await ensureBrowser();
-
-      await page.waitForSelector(selector, { timeout, state: state as any });
-
-      return { success: true, selector, state };
+    execute(args: any) {
+      return runWaitFor(args.selector, args.timeout, args.state);
     },
   },
 
@@ -276,9 +288,8 @@ export const playwrightTools = [
       type: "object",
       properties: {},
     },
-    async execute() {
-      await closeBrowser();
-      return { success: true };
+    execute() {
+      return runClose();
     },
   },
 ];

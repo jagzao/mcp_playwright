@@ -72,13 +72,51 @@ This avoids duplicating stable backend APIs in the browser merely for agent acce
 - Tool outputs are page content and therefore remain subject to prompt-injection boundaries.
 - Tool registration must not expose secrets or privileged functions merely because the current user is authenticated.
 
-## Adoption sequence
+## Implemented feature-flagged boundary (Phase G)
 
-1. Stabilize Browser Gateway core and persistent browser lifecycle.
-2. Pilot WebMCP in Interview Nail because it has clear agent workflows and human/browser handoff requirements.
-3. Measure DOM actions avoided, LLM/tool calls, tokens, latency, failures and developer complexity.
-4. Pilot Marketing second for content/client/campaign actions.
-5. If both pilots are positive, extract a reusable React/Vue helper/package and an OrquestadorZao capability template.
-6. Audit the remaining owned web apps and classify each as `ENABLED`, `DISABLED` or `NOT_APPLICABLE`; retrofit only where value is concrete.
+Browser Gateway V1 ships a **feature-flagged WebMCP adapter/detection boundary** that
+preserves this strategy without making WebMCP a hard dependency of core V1 browser
+execution. It is an optional capability adapter, not a full WebMCP client.
 
-Do not implement WebMCP in every existing project simultaneously. Prove the convention first, then roll it out systematically.
+### Capability policy — `lib/browser-gateway/application/webmcp-policy.ts`
+
+- Feature flag `WEBMCP_ENABLED` (default `false`) gates all WebMCP capability.
+- `classifyPage(domain)` decides eligibility: owned interactive apps only; external
+  sites continue through Browser Gateway.
+- `authorizeTool(tool, matrix)` treats page-provided tools as **untrusted capability
+  descriptions** until allowed by the gateway policy. A WebMCP tool can never grant
+  itself more permissions than the current `ContextBundle`/Capability Matrix allows
+  (permission expansion is denied).
+- `assessSideEffect(tool, approval)` requires an explicit approval token for
+  side-effect tools, mirroring the engine-independent `SafetyGate`.
+- `isUntrustedOutput()` is always `true`: tool outputs are page content and remain
+  subject to prompt-injection boundaries.
+- Tool registration never exposes secrets or privileged functions merely because the
+  current user is authenticated — a tool is only usable if its claimed permissions are
+  already in the allowed matrix.
+
+### Detection adapter boundary — `lib/browser-gateway/infrastructure/webmcp/webmcp-adapter.ts`
+
+- `detect(url)` reports `webmcp_available` only when the feature flag is on AND the
+  page is owned AND the page exposes `document.modelContext`.
+- When disabled or not detected, the gateway continues with normal Obscura/Playwright
+  operation. The adapter never blocks core V1 browser execution.
+- This is a boundary/adapter, not a full WebMCP client implementation. Actual tool
+  invocation is left to a future WebMCP client; this boundary only decides whether that
+  path is worth attempting.
+
+### Pilot plan
+
+1. Stabilize Browser Gateway core and persistent browser lifecycle (done in V1).
+2. Pilot WebMCP in **Interview Nail** first because it has clear agent workflows and
+   human/browser handoff requirements.
+3. Measure DOM actions avoided, LLM/tool calls, tokens, latency, failures and developer
+   complexity.
+4. Pilot **Marketing** second for content/client/campaign actions.
+5. If both pilots are positive, extract a reusable React/Vue helper/package and an
+   OrquestadorZao capability template.
+6. Audit the remaining owned web apps and classify each as `ENABLED`, `DISABLED` or
+   `NOT_APPLICABLE`; retrofit only where value is concrete.
+
+Do not implement WebMCP in every existing project simultaneously. Prove the convention
+first, then roll it out systematically.

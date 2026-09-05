@@ -1,110 +1,69 @@
-# 🚀 Guía de Inicio Rápido
+# 🚀 Browser Agent Gateway — Get running in 5 minutes
 
-Esta guía te llevará de 0 a ejecutar tu primer agente autónomo en menos de 10 minutos.
+This guide gets you from a fresh checkout to a working public-browse and research smoke in about 5 minutes.
 
-## Paso 1: Instalación (5 minutos)
+## 1. Install dependencies
 
 ```bash
-# 1. Clonar e instalar
-git clone <repo-url>
-cd mcp_playwright
 npm install
+npx playwright install chromium
+```
 
-# 2. Configurar variables de entorno
+## 2. Configure environment
+
+```bash
 cp .env.example .env
-# Edita .env y establece MASTER_KEY (32+ caracteres aleatorios)
-
-# 3. Instalar modelos locales
-npm run setup
-# ⏱️ Esto descarga ~15GB, toma 5-10 minutos
 ```
 
-## Paso 2: Verificar (1 minuto)
+Edit `.env` and set at least:
 
 ```bash
-npm run verify-models
+MASTER_KEY=your-32-character-random-string-here   # 32+ chars, required for encrypted sessions
 ```
 
-Deberías ver:
-```
-✅ ¡Todo funcionando correctamente!
-```
-
-## Paso 3: Tu Primera Automatización (2 minutos)
-
-### Ejemplo 1: Navegación Simple
+Optional (the gateway works without them, using Playwright fallback + offline research):
 
 ```bash
-npm run agent "Navega a google.com y búscate 'Playwright automation'"
+OBSCURA_MCP_COMMAND=            # enable Obscura as the primary engine
+DEEPSEEK_API_KEY=               # LLM operator routing
+SEARCH_BRAVE_API_KEY=           # Deep Research search provider
 ```
 
-### Ejemplo 2: Extraer Datos
+## 3. Verify readiness
 
 ```bash
-npm run agent "Navega a news.ycombinator.com y extrae los títulos de las primeras 10 noticias"
+npm run diagnose
 ```
 
-### Ejemplo 3: Grabar un Workflow
+This reports Obscura, Playwright, LLM/search provider and secret/session readiness — without leaking secrets. If it says Playwright chromium is missing, run `npx playwright install chromium`.
+
+## 4. Run a public browse smoke
 
 ```bash
-npm run record https://example.com
-
-# En el navegador que se abre:
-# 1. Haz las acciones que quieres automatizar
-# 2. Cierra el navegador
-# 3. El workflow se guarda automáticamente
+npm run smoke:gateway
 ```
 
-## Paso 4: Explorar Funciones Avanzadas
+This creates a session, reports health, navigates to `https://example.com` (falling back to Playwright when Obscura isn't configured), prints the execution telemetry, and runs an offline quick-research smoke.
 
-### Con Datos de Excel
-
-1. Crea `data/form-data/test.xlsx` con columnas: nombre, email
-2. Ejecuta:
-```bash
-npm run agent "Rellena el formulario en httpbin.org/forms/post con datos de test.xlsx"
-```
-
-### Modo Consola Interactivo
+## 5. Run a research smoke
 
 ```bash
-npm run console
+npm run dev -- research "What is the Browser Agent Gateway?" --mode quick
 ```
 
-Tendrás una interfaz interactiva para:
-- Ejecutar tareas
-- Ver métricas en vivo
-- Gestionar sesiones
-- Ver historial
+The offline smoke uses a fake search provider, so no API key is needed. To use real search providers, set `SEARCH_BRAVE_API_KEY` (or `SEARCH_EXA_API_KEY` / `SEARCH_TAVILY_API_KEY`) and re-run.
 
-## Próximos Pasos
+## Next steps
 
-- 📖 Lee el [README completo](README.md)
-- 🎯 Revisa [ejemplos avanzados](docs/examples.md)
-- ⚙️ Configura [LLMs](config/llm-config.json)
-- 🔒 Aprende sobre [seguridad](docs/security.md)
+- 📖 Read the [full README](README.md) for MCP tools, CLI commands, example flows and troubleshooting.
+- 🔒 Learn about [secrets and authenticated sessions](docs/security/secrets-and-authenticated-sessions.md).
+- 🧠 Read the [deep research architecture](docs/architecture/deep-research.md).
 
-## Solución de Problemas
+## Troubleshooting
 
-### Error: "Ollama no está corriendo"
-```bash
-ollama serve &
-```
-
-### Error: "Model not found"
-```bash
-npm run setup  # Re-instalar modelos
-```
-
-### El agente va muy lento
-- Es normal en el primer uso (descarga de modelos)
-- Usa cache después de la primera ejecución
-- De día solo usa Qwen (ligero)
-
-## Ayuda
-
-- 🐛 [Reportar bug](https://github.com/.../issues)
-- 💬 [Preguntas](https://github.com/.../discussions)
-- 📧 Contacto: support@...
-
-¡Disfruta la automatización con costo $0! 🎉
+| Problem | Fix |
+| --- | --- |
+| `Playwright chromium is not installed` | Run `npx playwright install chromium` |
+| `MASTER_KEY` too short | Set a 32+ character random string in `.env` |
+| Research returns `no_search_provider_available` | Set a search API key, or use the offline smoke (fake provider) |
+| Navigation returns `security_blocked` | Use a public `http(s)` URL (private/loopback is denied by default) |
