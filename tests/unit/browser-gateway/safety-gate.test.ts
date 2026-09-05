@@ -56,4 +56,64 @@ describe('SafetyGate (US-001)', () => {
     const gate = new SafetyGate(false);
     expect(gate.assess(task({ type: 'submit', target: '#form' })).status).toBe('allowed');
   });
+
+  describe('side-effect clicks (BLOCKER-2)', () => {
+    it('a plain/read click (no effect flag) is auto-allowed', () => {
+      const gate = new SafetyGate(true);
+      expect(gate.assess(task({ type: 'click', target: '#next' })).status).toBe('allowed');
+      expect(gate.assess(task({ type: 'click', target: '#next', sideEffect: 'read' } as any)).status).toBe(
+        'allowed',
+      );
+    });
+
+    it('a click with sideEffect=true is approval-required without a token (even with registry fallback)', () => {
+      const registry = new HmacApprovalRegistry('test-secret');
+      const gate = new SafetyGate(true, registry);
+      expect(
+        gate.assess(task({ type: 'click', target: '#buy', sideEffect: true })).status,
+      ).toBe('approval_required');
+      // A bare caller-supplied approved:true must not self-approve a side-effect click.
+      expect(
+        gate.assess(
+          task(
+            { type: 'click', target: '#buy', sideEffect: true },
+            { approved: true, approvalId: 'a-1' },
+          ),
+        ).status,
+      ).toBe('approval_required');
+    });
+
+    it('a click with sideEffect=\"side_effect\" is approval-required without a token', () => {
+      const gate = new SafetyGate(true);
+      expect(
+        gate.assess(task({ type: 'click', target: '#submit', sideEffect: 'side_effect' } as any)).status,
+      ).toBe('approval_required');
+    });
+
+    it('a side-effect click WITH a registry-issued approval token executes (approved path functional)', () => {
+      const registry = new HmacApprovalRegistry('test-secret');
+      const gate = new SafetyGate(true, registry);
+      const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'click' });
+      const verdict = gate.assess(
+        task(
+          { type: 'click', target: '#buy', sideEffect: true },
+          { approved: true, approvalId: token.approvalId, signature: token.signature },
+        ),
+      );
+      expect(verdict.status).toBe('allowed');
+    });
+
+    it('a side-effect click token for a different action does not approve this click', () => {
+      const registry = new HmacApprovalRegistry('test-secret');
+      const gate = new SafetyGate(true, registry);
+      const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'submit' });
+      const verdict = gate.assess(
+        task(
+          { type: 'click', target: '#buy', sideEffect: true },
+          { approved: true, approvalId: token.approvalId, signature: token.signature },
+        ),
+      );
+      expect(verdict.status).toBe('approval_required');
+    });
+  });
 });

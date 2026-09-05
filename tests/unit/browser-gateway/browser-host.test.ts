@@ -11,6 +11,9 @@ class FakeRuntime implements BrowserRuntime {
   closeCalls = 0;
   alive = true;
   url = 'https://example.com/login';
+  captureCalls = 0;
+  restoreCalls = 0;
+  navigateCalls = 0;
   private readonly openSessions = new Set<string>();
 
   async openSession(sessionId: string, opts?: { headed?: boolean }): Promise<void> {
@@ -22,6 +25,19 @@ class FakeRuntime implements BrowserRuntime {
 
   async currentUrl(sessionId: string): Promise<string | undefined> {
     return this.openSessions.has(sessionId) ? this.url : undefined;
+  }
+
+  async captureAuthState(sessionId: string): Promise<unknown | undefined> {
+    this.captureCalls += 1;
+    return this.openSessions.has(sessionId) ? { cookies: [{ name: 'sess' }] } : undefined;
+  }
+
+  async restoreAuthState(sessionId: string, _state: unknown): Promise<void> {
+    this.restoreCalls += 1;
+  }
+
+  async navigateTo(sessionId: string, url: string): Promise<void> {
+    this.navigateCalls += 1;
   }
 
   async isAlive(sessionId: string): Promise<boolean> {
@@ -229,5 +245,74 @@ describe('BrowserHost persistent lifecycle + HITL (Phase C)', () => {
 
     const waiting = host.listWaitingSessions();
     expect(waiting.map((s) => s.sessionId)).toEqual(['sA']);
+  });
+});
+
+describe('BrowserHost headless -> headed promotion preserves the useful page (HIGH-1)', () => {
+  it('captures URL+auth before promoting, reopens headed, restores URL, and checkpoint records the ORIGINAL URL', async () => {
+    const { host, runtime } = makeHost();
+    await host.createSession('s1', { headed: false });
+    expect(runtime.lastHeaded).toBe(false);
+
+    const before = runtime.url;
+    const suspend = await host.suspendForUser('s1', 'login required');
+
+    expect(suspend.ok).toBe(true);
+    if (!suspend.ok) return;
+    // Checkpoint must record the ORIGINAL (pre-promotion) URL, not a post-reopen URL.
+    expect(suspend.checkpoint.url).toBe(before);
+
+    // The promotion must NOT destroy state: it opened headed, captured before closing,
+    // restored auth, and navigated back to the useful page.
+    expect(runtime.captureCalls).toBeGreaterThan(0);
+    expect(runtime.closeCalls).toBeGreaterThan(0);
+    expect(runtime.openCalls).toBeGreaterThan(1);
+    expect(runtime.restoreCalls).toBeGreaterThan(0);
+    expect(runtime.navigateCalls).toBeGreaterThan(0);
+    expect(runtime.lastHeaded).toBe(true);
+    expect(host.getSession('s1')?.headed).toBe(true);
+    expect(host.getSessionStatus('s1')).toBe('waiting_for_user');
+  });
+});
+
+describe('BrowserHost deterministic waiting-task resolution (AC9/AC23)', () => {
+  it('resolveWaitingTask resumes ONLY the session whose activityId matches, given 2 waiting sessions', async () => {
+    const { host, runtime } = makeHost();
+    // Use headed sessions so suspendForUser does NOT promote (no close/reopen).
+    // This test is about deterministic waiting-task resolution, not promotion.
+    await host.createSession('sA', { headed: true });
+    await host.createSession('sB', { headed: true });
+
+    // Give each waiting session a distinct activityId.
+    const a = await host.suspendForUser('sA', 'login A', { activityId: 'activity-A' });
+    const b = await host.suspendForUser('sB', 'login B', { activityId: 'activity-B' });
+    expect(a.ok && b.ok).toBe(true);
+    if (!a.ok || !b.ok) return;
+
+    const resolved = await host.resolveWaitingTask('activity-A');
+    expect(resolved.ok).toBe(true);
+
+    // Session A resumed, session B still waiting.
+    expect(host.getSessionStatus('sA')).toBe('active');
+    expect(host.getSessionStatus('sB')).toBe('waiting_for_user');
+    // No extra close happened during resolution.
+    expect(runtime.closeCalls).toBe(0);
+  });
+
+  it('resolveWaitingTask rejects a missing or ambiguous activityId', async () => {
+    const { host } = makeHost();
+    await host.createSession('sA', { headed: false });
+    await host.createSession('sB', { headed: false });
+    await host.suspendForUser('sA', 'login', { activityId: 'activity-A' });
+    await host.suspendForUser('sB', 'login', { activityId: 'activity-A' });
+
+    const missing = await host.resolveWaitingTask('activity-zzz');
+    expect(missing.ok).toBe(false);
+
+    // Two sessions share the same activityId -> ambiguous, nothing resumed.
+    const ambiguous = await host.resolveWaitingTask('activity-A');
+    expect(ambiguous.ok).toBe(false);
+    expect(host.getSessionStatus('sA')).toBe('waiting_for_user');
+    expect(host.getSessionStatus('sB')).toBe('waiting_for_user');
   });
 });

@@ -248,6 +248,24 @@ export const gatewayTools: any[] = [
   },
 
   {
+    name: 'gateway_resume_activity',
+    description:
+      'Deterministically resume the waiting task whose checkpoint activityId matches. Resolves ONLY the matching waiting session (AC9/AC23) — no internal ids needed',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        activityId: { type: 'string', description: 'Logical activity id captured when the session was suspended' },
+      },
+      required: ['activityId'],
+    },
+    async execute(args: any) {
+      const result = await host.resolveWaitingTask(args.activityId);
+      if (!result.ok) return { success: false, reason: result.reason };
+      return { success: true, status: result.status, recovery: result.recovery, url: result.url };
+    },
+  },
+
+  {
     name: 'gateway_list_waiting',
     description: 'List sessions currently waiting for a human',
     inputSchema: { type: 'object', properties: {} },

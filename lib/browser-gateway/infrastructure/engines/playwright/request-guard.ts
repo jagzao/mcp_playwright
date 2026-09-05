@@ -32,6 +32,18 @@ export function attachRequestGuard(
       // it so it never surfaces as an unhandled rejection.
     }
   };
-  page.route('**/*', handler);
+  // `page.route()` returns a Promise. If the page/context/browser is closed
+  // while the route is being registered (e.g. a probe opens and closes a
+  // session rapidly), it rejects with "Target page, context or browser has
+  // been closed". The guard is a fire-and-forget network policy, so a failure
+  // to register it on a closing page is non-critical: swallow the rejection so
+  // it never surfaces as an unhandled rejection.
+  // `page.route()` returns a Promise<void>. If the page is closed while the
+  // route is being registered (e.g. a probe opens/closes a session rapidly), it
+  // rejects with "Target page, context or browser has been closed". The guard
+  // is a fire-and-forget network policy, so a failure to register on a closing
+  // page is non-critical. Swallow the rejection so it never surfaces as an
+  // unhandled rejection. `?.catch?.()` also keeps mocks that return void happy.
+  page.route('**/*', handler)?.catch?.(() => undefined);
   return handler;
 }

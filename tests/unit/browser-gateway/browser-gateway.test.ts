@@ -241,4 +241,52 @@ describe('BrowserGateway facade (US-001)', () => {
     expect(typeof summary.durationMs).toBe('number');
     expect(summary.status).toBe('success');
   });
+
+  it('BLOCKER-2: a side-effect click (sideEffect:true) is blocked without an approval token, even with engine fallback', async () => {
+    const primary = new FakeEngine('obscura', success('obscura'));
+    const fallback = new FakeEngine('playwright', success('playwright'));
+    const telemetry = new CapturingTelemetry();
+    const registry = new HmacApprovalRegistry('test-secret');
+    const gateway = buildGateway(primary, fallback, telemetry, { approvalRegistry: registry });
+
+    const blocked = await gateway.executeTask(
+      task({ action: { type: 'click', target: '#buy', sideEffect: true } }),
+    );
+    expect(blocked.status).toBe('blocked');
+    if (blocked.status === 'blocked') {
+      expect(blocked.category).toBe('approval_required');
+    }
+    // A bare caller-supplied approved:true must NOT self-approve a side-effect click.
+    expect(primary.executeCalls).toBe(0);
+    expect(fallback.executeCalls).toBe(0);
+  });
+
+  it('BLOCKER-2: a side-effect click WITH a registry-issued approval token executes (approved path functional)', async () => {
+    const primary = new FakeEngine('obscura', success('obscura'));
+    const fallback = new FakeEngine('playwright', success('playwright'));
+    const telemetry = new CapturingTelemetry();
+    const registry = new HmacApprovalRegistry('test-secret');
+    const gateway = buildGateway(primary, fallback, telemetry, { approvalRegistry: registry });
+
+    const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'click' });
+    const approved = await gateway.executeTask(
+      task({
+        action: { type: 'click', target: '#buy', sideEffect: true },
+        approval: { approved: true, approvalId: token.approvalId, signature: token.signature },
+      }),
+    );
+    expect(approved.status).toBe('success');
+    expect(primary.executeCalls).toBe(1);
+  });
+
+  it('BLOCKER-2: a plain/read click (no effect flag) stays auto-allowed', async () => {
+    const primary = new FakeEngine('obscura', success('obscura'));
+    const fallback = new FakeEngine('playwright', success('playwright'));
+    const telemetry = new CapturingTelemetry();
+    const gateway = buildGateway(primary, fallback, telemetry);
+
+    const result = await gateway.executeTask(task({ action: { type: 'click', target: '#next' } }));
+    expect(result.status).toBe('success');
+    expect(primary.executeCalls).toBe(1);
+  });
 });

@@ -110,13 +110,46 @@ export class BrowserHost {
     }
 
     // Pin to headed Playwright so the human can interact visibly.
+    //
+    // HIGH-1: when promoting headless -> headed we must NOT destroy the live
+    // context/page. Capture the useful page URL + auth state BEFORE closing,
+    // reopen headed, then restore the URL (and storage state when capturable)
+    // so the same useful page is preserved for the human. The checkpoint
+    // records the ORIGINAL (pre-promotion) URL, not the post-reopen URL.
+    let originalUrl = await this.runtime.currentUrl(sessionId);
     if (!session.headed) {
-      await this.runtime.closeSession(sessionId);
-      await this.runtime.openSession(sessionId, { headed: true });
+      let capturedState: unknown | undefined;
+      if (this.runtime.captureAuthState) {
+        capturedState = await this.runtime.captureAuthState(sessionId).catch(() => undefined);
+      }
+      // Re-read the URL as the authoritative pre-promotion page.
+      originalUrl = await this.runtime.currentUrl(sessionId);
+
+      try {
+        await this.runtime.closeSession(sessionId);
+      } catch {
+        return { ok: false, reason: 'failed to close headless session before headed promotion' };
+      }
+      try {
+        await this.runtime.openSession(sessionId, { headed: true });
+        // Call as a method (not a detached reference) so `this` stays bound to
+        // the runtime — otherwise the runtime's internal state access throws
+        // and the restore is silently swallowed.
+        if (capturedState !== undefined && this.runtime.restoreAuthState) {
+          await this.runtime.restoreAuthState(sessionId, capturedState).catch(() => undefined);
+        }
+      } catch {
+        return { ok: false, reason: 'failed to reopen session headed for human takeover' };
+      }
+      // Restore the useful page. Best-effort: if the URL is lost we still
+      // leave the session waiting so the human can continue from the tab.
+      if (originalUrl && this.runtime.navigateTo) {
+        await this.runtime.navigateTo(sessionId, originalUrl).catch(() => undefined);
+      }
       session.headed = true;
     }
 
-    const url = await this.runtime.currentUrl(sessionId);
+    const url = originalUrl;
     const checkpoint: BrowserCheckpoint = {
       checkpointId: `ck-${sessionId}-${++this.checkpointCounter}`,
       activityId: opts?.activityId ?? sessionId,
@@ -138,6 +171,32 @@ export class BrowserHost {
     }
 
     return { ok: true, checkpoint, status: 'waiting_for_user' };
+  }
+
+  /**
+   * Deterministically resolve a waiting task by its logical `activityId`
+   * (AC9/AC23). Finds the single waiting session whose checkpoint `activityId`
+   * matches and resumes it. If multiple sessions are waiting, this resolves
+   * ONLY the one matching the activityId — never a different session. This
+   * lets an upper layer continue the correct waiting task without the human
+   * knowing internal session/checkpoint ids.
+   */
+  async resolveWaitingTask(activityId: string): Promise<ResumeResult> {
+    if (!activityId) return { ok: false, reason: 'activityId is required' };
+    const matches = [...this.sessions.values()].filter(
+      (s) => s.status === 'waiting_for_user' && s.checkpoint?.activityId === activityId,
+    );
+    if (matches.length === 0) {
+      return { ok: false, reason: `no waiting session for activity ${activityId}` };
+    }
+    if (matches.length > 1) {
+      return { ok: false, reason: `multiple waiting sessions for activity ${activityId}` };
+    }
+    const target = matches[0];
+    if (!target.checkpoint) {
+      return { ok: false, reason: `waiting session ${target.sessionId} has no checkpoint` };
+    }
+    return this.resumeSession(target.sessionId, target.checkpoint.checkpointId);
   }
 
   /**

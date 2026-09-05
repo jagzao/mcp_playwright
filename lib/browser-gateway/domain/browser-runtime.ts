@@ -42,4 +42,14 @@ export interface BrowserRuntime {
    * sensitive and must never be logged or returned to tool callers.
    */
   captureAuthState?(sessionId: string): Promise<unknown | undefined>;
+
+  /** Restore an auth state previously captured with `captureAuthState`. */
+  restoreAuthState?(sessionId: string, state: unknown): Promise<void>;
+
+  /**
+   * Navigate the session's active page to a URL. Optional to keep the interface
+   * minimal; used by the host to preserve the useful page across headless ->
+   * headed promotion. Best-effort — failures must not block takeover.
+   */
+  navigateTo?(sessionId: string, url: string): Promise<void>;
 }

@@ -101,4 +101,51 @@ export class PlaywrightBrowserRuntime implements BrowserRuntime {
       return undefined;
     }
   }
+
+  async restoreAuthState(sessionId: string, state: unknown): Promise<void> {
+    const live = this.sessions.get(sessionId);
+    if (!live) return;
+
+    const storage = state as {
+      cookies?: Array<{ name: string; value: string }>;
+      origins?: Array<{ origin: string; localStorage: Array<{ name: string; value: string }> }>;
+    };
+
+    // Restore cookies first so they are present for any navigation that follows.
+    const cookies = storage.cookies ?? [];
+    if (cookies.length > 0) {
+      await live.context.addCookies(cookies);
+    }
+
+    // Restore localStorage per origin. The host navigates back to the original
+    // URL after restore, so seed each captured origin's localStorage via
+    // addInitScript — it runs before the page scripts on every navigation,
+    // guaranteeing SPA/localStorage-backed auth survives the promotion.
+    const origins = storage.origins ?? [];
+    for (const origin of origins) {
+      const entries = origin.localStorage ?? [];
+      if (entries.length === 0) continue;
+      const seed = Object.fromEntries(entries.map((e) => [e.name, e.value]));
+      await live.context.addInitScript((data) => {
+        try {
+          window.localStorage.clear();
+          for (const [key, value] of Object.entries(data)) {
+            window.localStorage.setItem(key, value);
+          }
+        } catch {
+          // Origin not yet loaded / storage unavailable — best-effort seed.
+        }
+      }, seed);
+    }
+  }
+
+  async navigateTo(sessionId: string, url: string): Promise<void> {
+    const live = this.sessions.get(sessionId);
+    if (!live) return;
+    try {
+      await live.page.goto(url, { waitUntil: 'domcontentloaded' });
+    } catch {
+      // Preserve takeover even if navigation fails; the tab stays open.
+    }
+  }
 }

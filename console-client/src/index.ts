@@ -151,6 +151,24 @@ program
   });
 
 program
+  .command('gateway:resume-activity <activityId>')
+  .description('Resume the waiting task matching an activityId (resolves only that session, no internal ids needed)')
+  .action(async (activityId) => {
+    try {
+      const result = await host.resolveWaitingTask(activityId);
+      if (!result.ok) {
+        console.error(chalk.red('Resume failed:'), result.reason);
+        process.exit(1);
+      }
+      console.log(chalk.green('Resumed:'), result.status, '| recovery:', result.recovery);
+      if (result.url) console.log(chalk.gray('URL:'), result.url);
+    } catch (error: any) {
+      console.error(chalk.red('Error:'), error.message);
+      process.exit(1);
+    }
+  });
+
+program
   .command('gateway:waiting')
   .description('List sessions currently waiting for a human')
   .action(() => {

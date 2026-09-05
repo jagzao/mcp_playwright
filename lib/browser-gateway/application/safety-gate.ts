@@ -35,12 +35,26 @@ export type SafetyVerdict =
   | { status: 'allowed'; reason: string }
   | { status: 'approval_required'; reason: string };
 
+/**
+ * True when the action has an irreversible external side effect.
+ *
+ * A `click` is normally read-only/reversible, but a real click can submit a
+ * form, publish, buy, or execute an irreversible admin action. So a click
+ * carrying `sideEffect: true` (or `sideEffect: 'side_effect'`) is classified
+ * exactly like `submit`/`send`/`publish` and requires approval, while a bare
+ * click (no flag / default) stays auto-allowed.
+ */
 function isExternalSideEffect(
   action: BrowserAction,
   requireApprovalForSideEffects: boolean,
 ): boolean {
   if (!requireApprovalForSideEffects) return false;
-  return SIDE_EFFECT_ACTION_TYPES.has(action.type);
+  if (SIDE_EFFECT_ACTION_TYPES.has(action.type)) return true;
+  if (action.type === 'click') {
+    const effect = action.sideEffect ?? 'read';
+    return effect === 'side_effect' || effect === true;
+  }
+  return false;
 }
 
 export class SafetyGate {

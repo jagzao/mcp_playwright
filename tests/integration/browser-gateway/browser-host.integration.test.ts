@@ -58,4 +58,110 @@ describe('BrowserHost persistent lifecycle + HITL (integration)', () => {
       await host.closeAll();
     }
   });
+
+  it('headless -> headed promotion preserves the useful page (URL restored, page alive) for a human', async () => {
+    if (!(await browserAvailable())) {
+      console.warn('SKIP: Playwright browser not installed. Run `npx playwright install` to enable.');
+      return;
+    }
+
+    const runtime = new PlaywrightBrowserRuntime();
+    const host = new BrowserHost({ runtime });
+
+    try {
+      // 1) Start NON-headed (machine-driven). Use distinct content that
+      //    survives promotion so we can prove the same useful page is back.
+      await host.createSession('it-promo', { headed: false });
+      const page = runtime.getPage('it-promo');
+      expect(page).toBeDefined();
+      if (!page) return;
+      await page.goto('https://example.com', { waitUntil: 'domcontentloaded' });
+      const originalUrl = page.url();
+
+      // 2) Trigger human takeover. This is the real headless -> headed transition.
+      const suspend = await host.suspendForUser('it-promo', 'login required');
+      expect(suspend.ok).toBe(true);
+      if (!suspend.ok) return;
+      expect(host.getSessionStatus('it-promo')).toBe('waiting_for_user');
+      expect(host.getSession('it-promo')?.headed).toBe(true);
+
+      // 3) The checkpoint must record the ORIGINAL (pre-promotion) URL.
+      expect(suspend.checkpoint.url).toBe(originalUrl);
+
+      // 4) The useful page is still available after promotion: alive and on the
+      //    same URL (restored into the headed session).
+      expect(await runtime.isAlive('it-promo')).toBe(true);
+      const promotedPage = runtime.getPage('it-promo');
+      expect(promotedPage).toBeDefined();
+      if (!promotedPage) return;
+      expect(await promotedPage.url()).toContain('example.com');
+
+      // 5) Resume continues the same logical session with URL continuity.
+      const resume = await host.resumeSession('it-promo', suspend.checkpoint.checkpointId);
+      expect(resume.ok).toBe(true);
+      if (resume.ok) {
+        expect(resume.recovery).toBe('live_continuity');
+        expect(resume.url).toContain('example.com');
+      }
+      expect(host.getSessionStatus('it-promo')).toBe('active');
+    } finally {
+      await host.closeAll();
+    }
+  });
+
+  it('restoreAuthState restores localStorage/origins, not just cookies, across a close/reopen', async () => {
+    if (!(await browserAvailable())) {
+      console.warn('SKIP: Playwright browser not installed. Run `npx playwright install` to enable.');
+      return;
+    }
+
+    const runtime = new PlaywrightBrowserRuntime();
+    const host = new BrowserHost({ runtime });
+
+    try {
+      // 1) Open a session, navigate, and seed localStorage + a cookie.
+      await host.createSession('it-auth', { headed: false });
+      const page = runtime.getPage('it-auth');
+      expect(page).toBeDefined();
+      if (!page) return;
+      await page.goto('https://example.com', { waitUntil: 'domcontentloaded' });
+      await page.evaluate(() => {
+        window.localStorage.setItem('session_token', 'spa-token-123');
+        window.localStorage.setItem('user', 'juan');
+      });
+      await runtime.getPage('it-auth')!.context().addCookies([
+        { name: 'sess', value: 'cookie-456', domain: 'example.com', path: '/' },
+      ]);
+
+      // 2) Capture the full storageState (cookies + origins/localStorage).
+      const captured = await runtime.captureAuthState('it-auth');
+      expect(captured).toBeDefined();
+      const storage = captured as { cookies: unknown[]; origins: unknown[] };
+      expect(storage.cookies.length).toBeGreaterThan(0);
+      expect(storage.origins.length).toBeGreaterThan(0);
+
+      // 3) Simulate the headless -> headed promotion: close, reopen, restore.
+      await runtime.closeSession('it-auth');
+      await runtime.openSession('it-auth', { headed: true });
+      await runtime.restoreAuthState('it-auth', captured);
+
+      // 4) Navigate back to the origin and verify localStorage survived.
+      const restoredPage = runtime.getPage('it-auth');
+      expect(restoredPage).toBeDefined();
+      if (!restoredPage) return;
+      await restoredPage.goto('https://example.com', { waitUntil: 'domcontentloaded' });
+      const restored = await restoredPage.evaluate(() => ({
+        token: window.localStorage.getItem('session_token'),
+        user: window.localStorage.getItem('user'),
+      }));
+      expect(restored.token).toBe('spa-token-123');
+      expect(restored.user).toBe('juan');
+
+      // 5) Cookies were restored too.
+      const cookies = await restoredPage.context().cookies('https://example.com');
+      expect(cookies.some((c) => c.name === 'sess' && c.value === 'cookie-456')).toBe(true);
+    } finally {
+      await host.closeAll();
+    }
+  });
 });
