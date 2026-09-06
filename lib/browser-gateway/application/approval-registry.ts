@@ -18,6 +18,12 @@ export interface ApprovalRequest {
   taskId: string;
   sessionId: string;
   actionType: string;
+  /**
+   * Optional target (selector) the approved action is bound to. When present,
+   * a token authorizes ONLY that exact reviewed target — e.g. a token issued
+   * for `#btn-482` cannot approve a click on `#delete-account`.
+   */
+  target?: string;
   /** Optional human-readable reason recorded for audit. */
   reason?: string;
 }
@@ -72,7 +78,13 @@ export class HmacApprovalRegistry implements ApprovalRegistry {
   }
 
   private sign(approvalId: string, request: ApprovalRequest): string {
-    const payload = [approvalId, request.taskId, request.sessionId, request.actionType].join('|');
+    const payload = [
+      approvalId,
+      request.taskId,
+      request.sessionId,
+      request.actionType,
+      request.target ?? '',
+    ].join('|');
     return createHmac('sha256', this.secret).update(payload).digest('hex');
   }
 }
@@ -81,7 +93,8 @@ function sameRequest(a: ApprovalRequest, b: ApprovalRequest): boolean {
   return (
     a.taskId === b.taskId &&
     a.sessionId === b.sessionId &&
-    a.actionType === b.actionType
+    a.actionType === b.actionType &&
+    (a.target ?? '') === (b.target ?? '')
   );
 }
 

@@ -45,11 +45,12 @@ export type SafetyVerdict =
  * hostile/mistaken agent can omit or rewrite to downgrade an irreversible click.
  *
  * The trusted `ClickPolicy` inspects the actual target/selector and classifies
- * irreversible side-effect patterns as such REGARDLESS of the caller flag. A
- * click is auto-allowed ONLY when the trusted policy says the target is
- * reversible (plain/navigation click). If either the trusted policy OR the
- * caller's explicit flag marks the click as a side effect, it requires
- * approval — a caller can never downgrade a matched side-effect click.
+ * it REGARDLESS of the caller flag. A click is auto-allowed ONLY when the
+ * trusted policy positively classifies the target as `safe_read` (an explicit
+ * safe/navigation class) AND the caller did not explicitly flag it as a side
+ * effect. If the trusted policy says `side_effect` OR `unknown`, approval is
+ * required — a caller can never downgrade a matched side-effect or ambiguous
+ * click by omitting or rewriting `sideEffect` (HIGH-C fail-closed).
  */
 function isExternalSideEffect(
   action: BrowserAction,
@@ -62,11 +63,13 @@ function isExternalSideEffect(
     // Trusted server-side classification wins over any caller claim.
     const trusted = clickPolicy.classify(action);
     const callerEffect = action.sideEffect ?? 'read';
-    return (
-      trusted === 'side_effect' ||
-      callerEffect === 'side_effect' ||
-      callerEffect === true
-    );
+    // A caller's `sideEffect: 'read'` must NOT downgrade an `unknown` or
+    // `side_effect` click. Only a trusted `safe_read` classification combined
+    // with a non-side-effect caller flag is auto-allowed.
+    if (trusted === 'side_effect' || trusted === 'unknown') return true;
+    // trusted === 'safe_read': auto-allow unless the caller explicitly flagged
+    // it as a side effect.
+    return callerEffect === 'side_effect' || callerEffect === true;
   }
   // A bare plain click on a reversible target is auto-allowed (see the
   // click branch above, which the ClickPolicy already cleared).
@@ -101,7 +104,8 @@ export class SafetyGate {
     }
 
     // A caller-supplied `approved: true` is NOT trusted. Only a token issued
-    // by the ApprovalRegistry for this exact task/action authorizes execution.
+    // by the ApprovalRegistry for this exact task/action/target authorizes
+    // execution.
     if (this.approvalRegistry && task.approval?.approvalId && task.approval.signature) {
       const ok = this.approvalRegistry.verify(
         { approvalId: task.approval.approvalId, signature: task.approval.signature },
@@ -109,6 +113,10 @@ export class SafetyGate {
           taskId: task.taskId,
           sessionId: task.sessionId,
           actionType: task.action.type,
+          // Bind the token to the exact reviewed target when the action targets
+          // a specific selector, so approving `#btn-482` does NOT authorize a
+          // click on `#delete-account`.
+          target: task.action.type === 'click' ? task.action.target : undefined,
         },
       );
       if (ok) {

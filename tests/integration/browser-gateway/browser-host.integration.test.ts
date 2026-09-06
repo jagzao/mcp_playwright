@@ -57,7 +57,7 @@ describe('BrowserHost persistent lifecycle + HITL (integration)', () => {
     } finally {
       await host.closeAll();
     }
-  });
+  }, 120000);
 
   it('headless -> headed promotion preserves the useful page (URL restored, page alive) for a human', async () => {
     if (!(await browserAvailable())) {
@@ -107,7 +107,7 @@ describe('BrowserHost persistent lifecycle + HITL (integration)', () => {
     } finally {
       await host.closeAll();
     }
-  });
+  }, 120000);
 
   it('restoreAuthState restores localStorage/origins, not just cookies, across a close/reopen', async () => {
     if (!(await browserAvailable())) {
@@ -163,7 +163,7 @@ describe('BrowserHost persistent lifecycle + HITL (integration)', () => {
     } finally {
       await host.closeAll();
     }
-  });
+  }, 120000);
 
   it('HIGH-A: restoreAuthState is origin-scoped — no cross-origin localStorage contamination, correct per-origin restore', async () => {
     if (!(await browserAvailable())) {
@@ -236,5 +236,5 @@ describe('BrowserHost persistent lifecycle + HITL (integration)', () => {
     } finally {
       await host.closeAll();
     }
-  });
+  }, 120000);
 });

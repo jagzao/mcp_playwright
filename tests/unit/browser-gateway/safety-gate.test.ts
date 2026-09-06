@@ -93,7 +93,7 @@ describe('SafetyGate (US-001)', () => {
     it('a side-effect click WITH a registry-issued approval token executes (approved path functional)', () => {
       const registry = new HmacApprovalRegistry('test-secret');
       const gate = new SafetyGate(true, registry);
-      const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'click' });
+      const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'click', target: '#buy' });
       const verdict = gate.assess(
         task(
           { type: 'click', target: '#buy', sideEffect: true },
@@ -159,11 +159,21 @@ describe('SafetyGate (US-001)', () => {
       }
     });
 
-    it('benign reversible UI controls are auto-allowed (not irreversible side effects)', () => {
+    it('opaque/generic selectors are fail-closed (unknown => approval_required) even when benign-looking', () => {
       const gate = new SafetyGate(true);
-      const benignTargets = ['#clear-filters', '#reset-form', '#apply-filters', '#accept-cookies', '#drop-down', '#register'];
-      for (const target of benignTargets) {
-        // @ts-expect-error — no sideEffect, benign reversible control stays auto-allowed.
+      const opaqueTargets = ['#clear-filters', '#reset-form', '#apply-filters', '#accept-cookies', '#drop-down', '#register'];
+      for (const target of opaqueTargets) {
+        // @ts-expect-error — no sideEffect; an opaque selector is `unknown` and must
+        // require approval (HIGH-C fail-closed), not be auto-allowed.
+        expect(gate.assess(task({ type: 'click', target })).status, `.assess #${target}`).toBe('approval_required');
+      }
+    });
+
+    it('explicitly safe reversible controls stay auto-allowed (closed allow-list)', () => {
+      const gate = new SafetyGate(true);
+      const safeTargets = ['#expand', '.accordion', '.collapse', '.close-modal', '.dismiss', '.back', '.cancel'];
+      for (const target of safeTargets) {
+        // @ts-expect-error — no sideEffect, explicit safe class stays auto-allowed.
         expect(gate.assess(task({ type: 'click', target })).status, `.assess #${target}`).toBe('allowed');
       }
     });
@@ -172,7 +182,7 @@ describe('SafetyGate (US-001)', () => {
       const registry = new HmacApprovalRegistry('test-secret');
       const gate = new SafetyGate(true, registry);
       // @ts-expect-error — no sideEffect, but ClickPolicy blocks; token must clear it.
-      const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'click' });
+      const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'click', target: '#publish' });
       const verdict = gate.assess(
         task(
           { type: 'click', target: '#publish' },
@@ -180,6 +190,88 @@ describe('SafetyGate (US-001)', () => {
         ),
       );
       expect(verdict.status).toBe('allowed');
+    });
+  });
+
+  describe('HIGH-C: fail-closed classification for opaque/ambiguous selectors', () => {
+    it('1. irreversible click with opaque selector #btn-482 => approval_required', () => {
+      const gate = new SafetyGate(true);
+      // @ts-expect-error — no sideEffect; opaque selector is `unknown`.
+      expect(gate.assess(task({ type: 'click', target: '#btn-482' })).status).toBe('approval_required');
+    });
+
+    it('2. irreversible click with [data-testid="primary-action"] => approval_required', () => {
+      const gate = new SafetyGate(true);
+      // @ts-expect-error — no sideEffect; data-testid is `unknown`.
+      expect(gate.assess(task({ type: 'click', target: '[data-testid="primary-action"]' })).status).toBe('approval_required');
+    });
+
+    it('3. caller sideEffect:"read" cannot downgrade an unknown click (still approval_required)', () => {
+      const gate = new SafetyGate(true);
+      expect(
+        gate.assess(task({ type: 'click', target: '#btn-482', sideEffect: 'read' })).status,
+      ).toBe('approval_required');
+      expect(
+        gate.assess(task({ type: 'click', target: '.primary', sideEffect: 'read' })).status,
+      ).toBe('approval_required');
+      expect(
+        gate.assess(task({ type: 'click', target: 'button:nth-child(3)', sideEffect: 'read' })).status,
+      ).toBe('approval_required');
+    });
+
+    it('5. safe known navigation/tab/pagination click stays auto-allowed', () => {
+      const gate = new SafetyGate(true);
+      expect(gate.assess(task({ type: 'click', target: '#next' })).status).toBe('allowed');
+      expect(gate.assess(task({ type: 'click', target: '[role="tab"]' })).status).toBe('allowed');
+      expect(gate.assess(task({ type: 'click', target: '.pagination' })).status).toBe('allowed');
+      expect(gate.assess(task({ type: 'click', target: 'a[href="/about"]' })).status).toBe('allowed');
+    });
+
+    it('6. approved token for an unknown/side-effect click allows ONLY the exact authorized target', () => {
+      const registry = new HmacApprovalRegistry('test-secret');
+      const gate = new SafetyGate(true, registry);
+      // A token for a different task does not approve this unknown click.
+      const wrongToken = registry.issue({ taskId: 't-other', sessionId: 's-1', actionType: 'click', target: '#btn-482' });
+      expect(
+        gate.assess(
+          task(
+            { type: 'click', target: '#btn-482' },
+            { approved: true, approvalId: wrongToken.approvalId, signature: wrongToken.signature },
+          ),
+        ).status,
+      ).toBe('approval_required');
+      // A token for a different action type does not approve this click.
+      const wrongActionToken = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'submit', target: '#btn-482' });
+      expect(
+        gate.assess(
+          task(
+            { type: 'click', target: '#btn-482' },
+            { approved: true, approvalId: wrongActionToken.approvalId, signature: wrongActionToken.signature },
+          ),
+        ).status,
+      ).toBe('approval_required');
+      // A token issued for a DIFFERENT target (#btn-482) does NOT approve a click
+      // on #delete-account, even on the same task+session+actionType (this is the
+      // medium finding: the token must authorize the SPECIFIC reviewed selector).
+      const wrongTargetToken = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'click', target: '#btn-482' });
+      expect(
+        gate.assess(
+          task(
+            { type: 'click', target: '#delete-account' },
+            { approved: true, approvalId: wrongTargetToken.approvalId, signature: wrongTargetToken.signature },
+          ),
+        ).status,
+      ).toBe('approval_required');
+      // The exact token for this task/action AND target DOES approve.
+      const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'click', target: '#btn-482' });
+      expect(
+        gate.assess(
+          task(
+            { type: 'click', target: '#btn-482' },
+            { approved: true, approvalId: token.approvalId, signature: token.signature },
+          ),
+        ).status,
+      ).toBe('allowed');
     });
   });
 });

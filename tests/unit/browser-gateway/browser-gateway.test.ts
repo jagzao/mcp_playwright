@@ -268,7 +268,7 @@ describe('BrowserGateway facade (US-001)', () => {
     const registry = new HmacApprovalRegistry('test-secret');
     const gateway = buildGateway(primary, fallback, telemetry, { approvalRegistry: registry });
 
-    const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'click' });
+    const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'click', target: '#buy' });
     const approved = await gateway.executeTask(
       task({
         action: { type: 'click', target: '#buy', sideEffect: true },
@@ -345,7 +345,7 @@ describe('BrowserGateway facade (US-001)', () => {
       const registry = new HmacApprovalRegistry('test-secret');
       const gateway = buildGateway(primary, fallback, telemetry, { approvalRegistry: registry });
 
-      const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'click' });
+      const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'click', target: '#buy' });
       // @ts-expect-error — omit sideEffect; token is the trusted approval that clears it.
       const approved = await gateway.executeTask(
         task({
@@ -367,6 +367,88 @@ describe('BrowserGateway facade (US-001)', () => {
         task({ action: { type: 'click', target: '#next', sideEffect: 'read' } }),
       );
       expect(result.status).toBe('success');
+      expect(primary.executeCalls).toBe(1);
+    });
+  });
+
+  describe('HIGH-C: fail-closed — unknown/opaque clicks are blocked before any engine runs', () => {
+    it('4. an unknown click (#btn-482) is blocked before Obscura/Playwright fallback (neither engine reached)', async () => {
+      const primary = new FakeEngine('obscura', success('obscura'));
+      const fallback = new FakeEngine('playwright', success('playwright'));
+      const telemetry = new CapturingTelemetry();
+      const gateway = buildGateway(primary, fallback, telemetry);
+
+      // @ts-expect-error — no sideEffect; opaque selector is `unknown`.
+      const blocked = await gateway.executeTask(task({ action: { type: 'click', target: '#btn-482' } }));
+      expect(blocked.status).toBe('blocked');
+      if (blocked.status === 'blocked') {
+        expect(blocked.category).toBe('approval_required');
+      }
+      // The gate refuses before any engine is consulted — no bypass via fallback.
+      expect(primary.executeCalls).toBe(0);
+      expect(fallback.executeCalls).toBe(0);
+    });
+
+    it('4b. an unknown click is blocked even when the primary would fail and fall back', async () => {
+      const primary = new FakeEngine('obscura', failure('obscura', 'provider_unavailable'));
+      const fallback = new FakeEngine('playwright', success('playwright'));
+      const telemetry = new CapturingTelemetry();
+      const gateway = buildGateway(primary, fallback, telemetry);
+
+      // @ts-expect-error — no sideEffect; opaque selector is `unknown`.
+      const blocked = await gateway.executeTask(task({ action: { type: 'click', target: '[data-testid="primary-action"]' } }));
+      expect(blocked.status).toBe('blocked');
+      if (blocked.status === 'blocked') {
+        expect(blocked.category).toBe('approval_required');
+      }
+      expect(primary.executeCalls).toBe(0);
+      expect(fallback.executeCalls).toBe(0);
+    });
+
+    it('3b. caller sideEffect:"read" cannot downgrade an unknown click at the gateway (still blocked)', async () => {
+      const primary = new FakeEngine('obscura', success('obscura'));
+      const fallback = new FakeEngine('playwright', success('playwright'));
+      const telemetry = new CapturingTelemetry();
+      const gateway = buildGateway(primary, fallback, telemetry);
+
+      const blocked = await gateway.executeTask(
+        task({ action: { type: 'click', target: '#btn-482', sideEffect: 'read' } as BrowserTask['action'] }),
+      );
+      expect(blocked.status).toBe('blocked');
+      if (blocked.status === 'blocked') {
+        expect(blocked.category).toBe('approval_required');
+      }
+      expect(primary.executeCalls).toBe(0);
+      expect(fallback.executeCalls).toBe(0);
+    });
+
+    it('6b. an approved token for an unknown click allows ONLY the exact authorized action', async () => {
+      const primary = new FakeEngine('obscura', success('obscura'));
+      const fallback = new FakeEngine('playwright', success('playwright'));
+      const telemetry = new CapturingTelemetry();
+      const registry = new HmacApprovalRegistry('test-secret');
+      const gateway = buildGateway(primary, fallback, telemetry, { approvalRegistry: registry });
+
+      // A token for a different task does not approve this unknown click.
+      const wrongToken = registry.issue({ taskId: 't-other', sessionId: 's-1', actionType: 'click', target: '#btn-482' });
+      const stillBlocked = await gateway.executeTask(
+        task({
+          action: { type: 'click', target: '#btn-482' },
+          approval: { approved: true, approvalId: wrongToken.approvalId, signature: wrongToken.signature },
+        }),
+      );
+      expect(stillBlocked.status).toBe('blocked');
+      expect(primary.executeCalls).toBe(0);
+
+      // The exact token for this task/action AND target DOES approve.
+      const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'click', target: '#btn-482' });
+      const approved = await gateway.executeTask(
+        task({
+          action: { type: 'click', target: '#btn-482' },
+          approval: { approved: true, approvalId: token.approvalId, signature: token.signature },
+        }),
+      );
+      expect(approved.status).toBe('success');
       expect(primary.executeCalls).toBe(1);
     });
   });
