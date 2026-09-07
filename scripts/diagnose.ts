@@ -79,11 +79,17 @@ checks.push({
 
 // --- Browser Agent Gateway readiness -----------------------------------------
 
-// Obscura readiness
+// Obscura readiness (REAL engine: launches the obscura-node CDP binary)
 checks.push({
-  name: 'Obscura configured (OBSCURA_MCP_COMMAND)',
-  check: () => Boolean(process.env.OBSCURA_MCP_COMMAND?.trim()),
-  fix: 'Set OBSCURA_MCP_COMMAND in .env to enable Obscura as the primary engine (optional; Playwright fallback applies otherwise)',
+  name: 'Obscura engine available',
+  check: async () => {
+    const { ObscuraEngine } = await import(
+      '../lib/browser-gateway/infrastructure/engines/obscura/obscura-engine.js'
+    );
+    const health = await new ObscuraEngine().health().catch(() => ({ healthy: false }));
+    return health.healthy;
+  },
+  fix: 'Install the Obscura browser binary: npm install obscura-node (launches automatically on first use). Optional; Playwright fallback applies otherwise.',
   optional: true,
 });
 
