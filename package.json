@@ -9,6 +9,8 @@
     "init": "bash scripts/init.sh",
     "diagnose": "tsx scripts/diagnose.ts",
     "smoke:gateway": "tsx scripts/gateway-smoke.ts",
+    "rc:s4-login": "tsx scripts/rc-s4-login.ts",
+    "rc:s4-finish": "tsx scripts/rc-s4-finish.ts",
     "build": "tsc -b tsconfig.json",
     "dev": "tsx watch console-client/src/index.ts",
     "start": "node dist/console-client/src/index.js",
