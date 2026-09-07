@@ -48,11 +48,15 @@ jobs:
       - name: Run unit tests (real gate)
         run: npm run test:unit
 
-      # Browser-gateway integration tests (real gate). The legacy
-      # `agent-flow.test.ts` is excluded: it requires an external Qwen endpoint
-      # and is a documented pre-existing known failure unrelated to the gateway.
-      - name: Run browser-gateway integration tests (real gate)
-        run: npx vitest run tests/integration/browser-gateway
+      # Browser-gateway approval-flow integration tests (real gate). This covers
+      # the BLOCKER-E cross-process approval path and the BLOCKER-G real-engine
+      # routing, deterministically (no headed browser / display needed). The
+      # legacy `agent-flow.test.ts` and `browser-host.integration.test.ts` are
+      # excluded: the former needs an external Qwen endpoint, the latter needs a
+      # headed display (X server) — both are documented pre-existing known
+      # failures unrelated to this change.
+      - name: Run approval-flow integration tests (real gate)
+        run: npx vitest run tests/integration/browser-gateway/approval-flow.integration.test.ts
 
       - name: Check for TypeScript errors
         run: npx tsc --noEmit
