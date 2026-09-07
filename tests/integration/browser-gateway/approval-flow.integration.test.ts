@@ -66,7 +66,7 @@ describe('Approval flow end-to-end (BLOCKER-E, integration)', () => {
     const filePath = join(dir, 'approval-registry.json');
 
     // "MCP server" process: gateway with a file-backed registry.
-    const serverRegistry = new FileApprovalRegistry('test-secret', filePath);
+    const serverRegistry = new FileApprovalRegistry('test-secret-0123456789abcdef0123456789abcdef', filePath);
     const primary = new FakeEngine('obscura');
     const gateway = new BrowserGateway({
       primaryEngine: primary,
@@ -90,7 +90,7 @@ describe('Approval flow end-to-end (BLOCKER-E, integration)', () => {
 
     // 2) "Operator CLI" process: a SEPARATE registry instance reading the same
     //    file can see the pending request (cross-process visibility).
-    const operatorRegistry = new FileApprovalRegistry('test-secret', filePath);
+    const operatorRegistry = new FileApprovalRegistry('test-secret-0123456789abcdef0123456789abcdef', filePath);
     const pending = operatorRegistry.getPending(pendingId);
     expect(pending).toBeDefined();
     expect(pending?.status).toBe('pending');
@@ -132,7 +132,7 @@ describe('Approval flow end-to-end (BLOCKER-E, integration)', () => {
     });
     // The operator CLI is a fresh process: re-instantiate the registry so it
     // re-reads the file and sees the newly-persisted pending (real topology).
-    const freshOperator = new FileApprovalRegistry('test-secret', filePath);
+    const freshOperator = new FileApprovalRegistry('test-secret-0123456789abcdef0123456789abcdef', filePath);
     const otherApproved = freshOperator.approve(otherPending.pendingId, 'operator');
     expect(otherApproved.ok).toBe(true);
     if (!otherApproved.ok) return;
@@ -153,7 +153,7 @@ describe('Approval flow end-to-end (BLOCKER-E, integration)', () => {
   it('an untrusted caller cannot self-approve: no approve path exists on the gateway/MCP surface', async () => {
     dir = mkdtempSync(join(tmpdir(), 'approval-flow-'));
     const filePath = join(dir, 'approval-registry.json');
-    const registry = new FileApprovalRegistry('test-secret', filePath);
+    const registry = new FileApprovalRegistry('test-secret-0123456789abcdef0123456789abcdef', filePath);
     const primary = new FakeEngine('obscura');
     const gateway = new BrowserGateway({
       primaryEngine: primary,
@@ -177,7 +177,7 @@ describe('Approval flow end-to-end (BLOCKER-E, integration)', () => {
   it('expiry is rejected: an expired pending cannot be approved or executed', async () => {
     dir = mkdtempSync(join(tmpdir(), 'approval-flow-'));
     const filePath = join(dir, 'approval-registry.json');
-    const registry = new FileApprovalRegistry('test-secret', filePath);
+    const registry = new FileApprovalRegistry('test-secret-0123456789abcdef0123456789abcdef', filePath);
     const primary = new FakeEngine('obscura');
     const gateway = new BrowserGateway({
       primaryEngine: primary,
@@ -194,6 +194,90 @@ describe('Approval flow end-to-end (BLOCKER-E, integration)', () => {
     const approve = registry.approve(expiredPending.pendingId, 'operator');
     expect(approve.ok).toBe(false);
     expect(primary.executeCalls).toBe(0);
+  }, 30000);
+});
+
+/**
+ * HIGH-J: the default runtime path must work with ONLY a strong APPROVAL_SECRET
+ * configured and NO MASTER_KEY. The server creates a pending, the operator CLI
+ * (a separate FileApprovalRegistry instance over the same file) approves it, and
+ * the server verifies — proving APPROVAL_SECRET is actually wired into the
+ * default registry (not just documented).
+ */
+describe('HIGH-J: default path works with only a strong APPROVAL_SECRET (no MASTER_KEY)', () => {
+  let dir: string;
+
+  afterEach(() => {
+    if (dir && existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('server creates pending -> operator CLI approves -> server verifies, with only APPROVAL_SECRET', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'approval-flow-approval-secret-'));
+    const strongSecret = 'test-secret-0123456789abcdef0123456789abcdef';
+
+    // HIGH-J: exercise the REAL default env-var path. Set only APPROVAL_SECRET
+    // (no MASTER_KEY) and construct via the default factory so the env wiring is
+    // proven end-to-end, not just by passing the secret explicitly.
+    const prevApproval = process.env.APPROVAL_SECRET;
+    const prevMaster = process.env.MASTER_KEY;
+    process.env.APPROVAL_SECRET = strongSecret;
+    delete process.env.MASTER_KEY;
+
+    const { createApprovalRegistry } = await import(
+      '../../../lib/browser-gateway/infrastructure/gateway-factory.js'
+    );
+
+    try {
+      // "MCP server" process: default file-backed registry configured ONLY via
+      // the strong APPROVAL_SECRET env var (no MASTER_KEY). This is the real
+      // default factory path: createApprovalRegistry() -> new FileApprovalRegistry().
+      const serverRegistry = createApprovalRegistry();
+      const primary = new FakeEngine('obscura');
+      const gateway = new BrowserGateway({
+        primaryEngine: primary,
+        fallbackEngine: new FakeEngine('playwright'),
+        llmRouter: makeRouter(),
+        approvalRegistry: serverRegistry,
+      });
+
+      // 1) A raw click is blocked and a pending approval is created.
+      const blocked = await gateway.executeTask({
+        taskId: 't-1',
+        sessionId: 's-1',
+        action: { type: 'click', target: '#delete-account' },
+      });
+      expect(blocked.status).toBe('blocked');
+      if (blocked.status !== 'blocked') return;
+      expect(blocked.category).toBe('approval_required');
+      const pendingId = blocked.pendingId!;
+      expect(pendingId).toBeTruthy();
+
+      // 2) "Operator CLI" process: a SEPARATE registry instance (same file, same
+      //    strong APPROVAL_SECRET env) sees the pending and approves it.
+      const operatorRegistry = createApprovalRegistry();
+      const pending = operatorRegistry.getPending(pendingId);
+      expect(pending).toBeDefined();
+      expect(pending?.status).toBe('pending');
+      const approved = operatorRegistry.approve(pendingId, 'operator');
+      expect(approved.ok).toBe(true);
+      if (!approved.ok) return;
+      const token = approved.token;
+
+      // 3) Server verifies the operator-issued token and executes the exact action.
+      const executed = await gateway.executeTask({
+        taskId: 't-1',
+        sessionId: 's-1',
+        action: { type: 'click', target: '#delete-account' },
+        approval: { approved: true, approvalId: token.approvalId, signature: token.signature },
+      });
+      expect(executed.status).toBe('success');
+      expect(primary.executeCalls).toBe(1);
+    } finally {
+      if (prevApproval !== undefined) process.env.APPROVAL_SECRET = prevApproval;
+      else delete process.env.APPROVAL_SECRET;
+      if (prevMaster !== undefined) process.env.MASTER_KEY = prevMaster;
+      else delete process.env.MASTER_KEY;
+    }
   }, 30000);
 });
 
@@ -229,7 +313,7 @@ describe('BLOCKER-G: approved legacy click reaches the real Playwright engine ru
       .spyOn(playwrightTools, 'runClick')
       .mockResolvedValue({ success: true, selector: 'a[href="/about"]' } as never);
 
-    const registry = new HmacApprovalRegistry('test-secret');
+    const registry = new HmacApprovalRegistry('test-secret-0123456789abcdef0123456789abcdef');
     const engine = new PlaywrightEngine();
     const gateway = new BrowserGateway({
       primaryEngine: engine,

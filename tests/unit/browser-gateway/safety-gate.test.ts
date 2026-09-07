@@ -24,7 +24,7 @@ describe('SafetyGate (US-001)', () => {
   });
 
   it('a bare caller-supplied approved:true is rejected (AC19)', () => {
-    const registry = new HmacApprovalRegistry('test-secret');
+    const registry = new HmacApprovalRegistry('test-secret-0123456789abcdef0123456789abcdef');
     const gate = new SafetyGate(true, registry);
     const verdict = gate.assess(
       task({ type: 'submit', target: '#form' }, { approved: true, approvalId: 'a-1' }),
@@ -33,7 +33,7 @@ describe('SafetyGate (US-001)', () => {
   });
 
   it('a registry-issued approval token allows execution (AC19)', () => {
-    const registry = new HmacApprovalRegistry('test-secret');
+    const registry = new HmacApprovalRegistry('test-secret-0123456789abcdef0123456789abcdef');
     const gate = new SafetyGate(true, registry);
     const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'submit', target: '#form' });
     const verdict = gate.assess(
@@ -43,7 +43,7 @@ describe('SafetyGate (US-001)', () => {
   });
 
   it('a token issued for a different task/action is rejected (AC19)', () => {
-    const registry = new HmacApprovalRegistry('test-secret');
+    const registry = new HmacApprovalRegistry('test-secret-0123456789abcdef0123456789abcdef');
     const gate = new SafetyGate(true, registry);
     const token = registry.issue({ taskId: 't-other', sessionId: 's-1', actionType: 'submit' });
     const verdict = gate.assess(
@@ -67,7 +67,7 @@ describe('SafetyGate (US-001)', () => {
     });
 
     it('a click with sideEffect=true is approval-required without a token (even with registry fallback)', () => {
-      const registry = new HmacApprovalRegistry('test-secret');
+      const registry = new HmacApprovalRegistry('test-secret-0123456789abcdef0123456789abcdef');
       const gate = new SafetyGate(true, registry);
       expect(
         gate.assess(task({ type: 'click', target: '#buy', sideEffect: true })).status,
@@ -91,7 +91,7 @@ describe('SafetyGate (US-001)', () => {
     });
 
     it('a side-effect click WITH a registry-issued approval token executes (approved path functional)', () => {
-      const registry = new HmacApprovalRegistry('test-secret');
+      const registry = new HmacApprovalRegistry('test-secret-0123456789abcdef0123456789abcdef');
       const gate = new SafetyGate(true, registry);
       const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'click', target: '#buy' });
       const verdict = gate.assess(
@@ -104,7 +104,7 @@ describe('SafetyGate (US-001)', () => {
     });
 
     it('a side-effect click token for a different action does not approve this click', () => {
-      const registry = new HmacApprovalRegistry('test-secret');
+      const registry = new HmacApprovalRegistry('test-secret-0123456789abcdef0123456789abcdef');
       const gate = new SafetyGate(true, registry);
       const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'submit' });
       const verdict = gate.assess(
@@ -141,7 +141,7 @@ describe('SafetyGate (US-001)', () => {
     });
 
     it('a caller cannot bypass by omitting sideEffect even with a bare approved:true', () => {
-      const registry = new HmacApprovalRegistry('test-secret');
+      const registry = new HmacApprovalRegistry('test-secret-0123456789abcdef0123456789abcdef');
       const gate = new SafetyGate(true, registry);
       // @ts-expect-error — intentionally omit sideEffect.
       const verdict = gate.assess(
@@ -179,7 +179,7 @@ describe('SafetyGate (US-001)', () => {
     });
 
     it('an approved side-effect click WITH a registry-issued token still executes', () => {
-      const registry = new HmacApprovalRegistry('test-secret');
+      const registry = new HmacApprovalRegistry('test-secret-0123456789abcdef0123456789abcdef');
       const gate = new SafetyGate(true, registry);
       // @ts-expect-error — no sideEffect, but ClickPolicy blocks; token must clear it.
       const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'click', target: '#publish' });
@@ -228,7 +228,7 @@ describe('SafetyGate (US-001)', () => {
     });
 
     it('6. approved token for an unknown/side-effect click allows ONLY the exact authorized target', () => {
-      const registry = new HmacApprovalRegistry('test-secret');
+      const registry = new HmacApprovalRegistry('test-secret-0123456789abcdef0123456789abcdef');
       const gate = new SafetyGate(true, registry);
       // A token for a different task does not approve this unknown click.
       const wrongToken = registry.issue({ taskId: 't-other', sessionId: 's-1', actionType: 'click', target: '#btn-482' });
@@ -288,7 +288,7 @@ describe('SafetyGate (US-001)', () => {
 
   describe('MEDIUM: target binding generalized to submit/send/publish', () => {
     it('a submit token is bound to its target (a token for a different target is rejected)', () => {
-      const registry = new HmacApprovalRegistry('test-secret');
+      const registry = new HmacApprovalRegistry('test-secret-0123456789abcdef0123456789abcdef');
       const gate = new SafetyGate(true, registry);
       const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'submit', target: '#form-a' });
       // Exact target approves.
@@ -306,7 +306,7 @@ describe('SafetyGate (US-001)', () => {
     });
 
     it('a send token is bound to its target', () => {
-      const registry = new HmacApprovalRegistry('test-secret');
+      const registry = new HmacApprovalRegistry('test-secret-0123456789abcdef0123456789abcdef');
       const gate = new SafetyGate(true, registry);
       const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'send', target: '#msg' });
       expect(
@@ -322,7 +322,7 @@ describe('SafetyGate (US-001)', () => {
     });
 
     it('a publish token is bound to its target', () => {
-      const registry = new HmacApprovalRegistry('test-secret');
+      const registry = new HmacApprovalRegistry('test-secret-0123456789abcdef0123456789abcdef');
       const gate = new SafetyGate(true, registry);
       const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'publish', target: '#post' });
       expect(

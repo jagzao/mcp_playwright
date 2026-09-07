@@ -1,4 +1,8 @@
-import { randomBytes, createHmac, timingSafeEqual, hkdfSync } from 'crypto';
+import { randomBytes, createHmac, timingSafeEqual } from 'crypto';
+import {
+  isStrongApprovalSecret,
+  resolveApprovalSecret,
+} from '../../security/secret-resolver.js';
 
 /**
  * Approval registry (AC19 / AC16 / BLOCKER-E).
@@ -93,23 +97,11 @@ export interface ApprovalRegistry {
 
 export const DEFAULT_APPROVAL_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-/** Minimum length for a usable MASTER_KEY (>=32 chars). */
-export const MIN_MASTER_KEY_LENGTH = 32;
-
-/** Fixed HKDF info/salt for deriving the approval subkey from MASTER_KEY. */
-const APPROVAL_HKDF_INFO = 'browser-gateway-approval';
-const APPROVAL_HKDF_SALT = 'browser-gateway-approval-salt-v1';
-
 /**
- * Derive a stable, non-static approval subkey from a MASTER_KEY via HKDF-SHA256.
- * The same MASTER_KEY always yields the same subkey (so two processes sharing a
- * MASTER_KEY can cross-verify), but the subkey is NOT a hardcoded default and is
- * distinct from the master key itself (key separation).
+ * Minimum length for a usable MASTER_KEY (>=32 chars). Re-exported from the
+ * shared secret resolver so runtime and diagnose share one source of truth.
  */
-export function deriveApprovalSecret(masterKey: string): string {
-  const derived = hkdfSync('sha256', Buffer.from(masterKey, 'utf-8'), APPROVAL_HKDF_SALT, APPROVAL_HKDF_INFO, 32);
-  return Buffer.from(derived).toString('hex');
-}
+export { MIN_MASTER_KEY_LENGTH, deriveApprovalSecret } from '../../security/secret-resolver.js';
 
 export class HmacApprovalRegistry implements ApprovalRegistry {
   private readonly secret: string | undefined;
@@ -119,22 +111,21 @@ export class HmacApprovalRegistry implements ApprovalRegistry {
 
   /**
    * BLOCKER-F: there is NO static default secret. The registry is only usable
-   * when an explicit `secret` is passed OR a valid MASTER_KEY (>=32 chars) is
-   * available to derive a dedicated subkey from. Otherwise the registry is
-   * fail-closed: `isConfigured()` is false and every signing/verification
+   * when a strong explicit `secret` is passed OR a strong APPROVAL_SECRET /
+   * MASTER_KEY is available (see `resolveApprovalSecret`). Otherwise the registry
+   * is fail-closed: `isConfigured()` is false and every signing/verification
    * operation throws or fails rather than silently using a known default.
+   *
+   * BLOCKER-I: an explicit `secret` is validated with `isStrongApprovalSecret`.
+   * A weak/placeholder explicit secret is treated as unconfigured (fail-closed)
+   * rather than silently accepted.
    */
   constructor(secret?: string) {
     if (secret !== undefined && secret !== null && secret !== '') {
-      this.secret = secret;
+      this.secret = isStrongApprovalSecret(secret) ? secret : undefined;
       return;
     }
-    const masterKey = process.env.MASTER_KEY;
-    if (masterKey && masterKey.length >= MIN_MASTER_KEY_LENGTH) {
-      this.secret = deriveApprovalSecret(masterKey);
-      return;
-    }
-    this.secret = undefined;
+    this.secret = resolveApprovalSecret();
   }
 
   /** True when a usable secret is configured (explicit or derived from MASTER_KEY). */

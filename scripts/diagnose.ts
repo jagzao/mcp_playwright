@@ -7,6 +7,10 @@ import { createSessionVault } from '../lib/browser-gateway/infrastructure/gatewa
 import { createEnvOperators } from '../lib/browser-gateway/infrastructure/llm/env-operators.js';
 import { EnvSecretProvider } from '../lib/browser-gateway/infrastructure/secret-provider/env-secret-provider.js';
 import { launchWithFallback } from '../lib/browser-gateway/infrastructure/engines/playwright/launch-with-fallback.js';
+import {
+  isValidMasterKey,
+  resolveApprovalSecret,
+} from '../lib/security/secret-resolver.js';
 
 console.log(chalk.blue('\n🔍 MCP Playwright Automation - System Diagnostic\n'));
 
@@ -105,10 +109,7 @@ checks.push({
 // MASTER_KEY (secret/session infrastructure)
 checks.push({
   name: 'MASTER_KEY configured (32+ chars)',
-  check: () => {
-    const key = process.env.MASTER_KEY;
-    return Boolean(key && key.length >= 32 && !key.includes('your-32-character'));
-  },
+  check: () => isValidMasterKey(process.env.MASTER_KEY),
   fix: 'Set a MASTER_KEY of 32+ random characters in .env (required for durable encrypted sessions)',
 });
 
@@ -125,12 +126,7 @@ checks.push({
 // from which a dedicated subkey is HKDF-derived) must be configured.
 checks.push({
   name: 'Approval secret configured (APPROVAL_SECRET or MASTER_KEY 32+)',
-  check: () => {
-    const approvalSecret = process.env.APPROVAL_SECRET;
-    if (approvalSecret && approvalSecret.trim().length > 0) return true;
-    const masterKey = process.env.MASTER_KEY;
-    return Boolean(masterKey && masterKey.length >= 32 && !masterKey.includes('your-32-character'));
-  },
+  check: () => resolveApprovalSecret() !== undefined,
   fix: 'Set APPROVAL_SECRET (a random string) OR a MASTER_KEY of 32+ random characters in .env. Without one, the approval registry is fail-closed and side-effect approvals cannot be issued/verified.',
 });
 

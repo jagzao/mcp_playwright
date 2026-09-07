@@ -9,8 +9,8 @@ import { PlaywrightBrowserRuntime } from './engines/playwright/playwright-browse
 import { createEnvOperators } from './llm/env-operators.js';
 import { FileSessionVault } from './session-vault.js';
 import { SessionVaultPersistAuth } from './session-vault-persist-auth.js';
+import { isValidMasterKey } from '../../security/secret-resolver.js';
 import type { SessionVault } from '../domain/session-vault.js';
-
 /**
  * Factory that wires a ready-to-use gateway from configuration. Transport
  * layers (MCP, CLI) consume this so business logic is not duplicated.
@@ -107,6 +107,9 @@ export function createBrowserHost(
  */
 export function createSessionVault(masterKey?: string): SessionVault | undefined {
   const key = masterKey ?? process.env.MASTER_KEY;
-  if (!key || key.length < 32) return undefined;
-  return new FileSessionVault(key);
+  // BLOCKER-I: reject known placeholders/weak keys via the shared resolver, not
+  // just a raw length check. The public `.env.example` placeholder must never
+  // become a usable vault key.
+  if (!isValidMasterKey(key)) return undefined;
+  return new FileSessionVault(key as string);
 }

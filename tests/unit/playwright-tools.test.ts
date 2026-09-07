@@ -181,7 +181,7 @@ describe('Playwright Tools', () => {
 
       // Inject a gateway with a fake engine + in-memory registry so no real
       // browser is needed. The registry is shared across the round-trip.
-      const registry = new HmacApprovalRegistry('test-secret');
+      const registry = new HmacApprovalRegistry('test-secret-0123456789abcdef0123456789abcdef');
       const primary = new FakeEngine('obscura');
       const gateway = new BrowserGateway({
         primaryEngine: primary,
@@ -220,7 +220,7 @@ describe('Playwright Tools', () => {
       expect(tool).toBeDefined();
       if (!tool) return;
 
-      const registry = new HmacApprovalRegistry('test-secret');
+      const registry = new HmacApprovalRegistry('test-secret-0123456789abcdef0123456789abcdef');
       const primary = new FakeEngine('obscura');
       const gateway = new BrowserGateway({
         primaryEngine: primary,

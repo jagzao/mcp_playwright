@@ -3,6 +3,8 @@ import { mkdtempSync, rmSync, readFileSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { FileSessionVault } from '../../../lib/browser-gateway/infrastructure/session-vault.js';
+import { createSessionVault } from '../../../lib/browser-gateway/infrastructure/gateway-factory.js';
+import { SecretsManager } from '../../../lib/security/secrets-manager.js';
 import type { SessionProfile, BrowserAuthState } from '../../../lib/browser-gateway/domain/session-vault.js';
 
 const MASTER_KEY = 'test-master-key-0123456789abcdef0123456789abcdef';
@@ -184,5 +186,38 @@ describe('SessionVault (US-002 / Phase D)', () => {
     const onDisk = readFileSync(path, 'utf-8');
     expect(onDisk).not.toContain('SECRET_COOKIE_VALUE');
     expect(onDisk).not.toContain('cookies');
+  });
+});
+
+describe('SessionVault (BLOCKER-I: public placeholder MASTER_KEY must never configure)', () => {
+  it('createSessionVault rejects the committed .env.example placeholder', () => {
+    const prev = process.env.MASTER_KEY;
+    try {
+      process.env.MASTER_KEY = 'your-32-character-master-key-here';
+      expect(createSessionVault()).toBeUndefined();
+      expect(createSessionVault('your-32-character-master-key-here')).toBeUndefined();
+    } finally {
+      if (prev !== undefined) process.env.MASTER_KEY = prev;
+      else delete process.env.MASTER_KEY;
+    }
+  });
+
+  it('SecretsManager throws on the committed .env.example placeholder', () => {
+    expect(() => new SecretsManager('your-32-character-master-key-here')).toThrow();
+  });
+
+  it('SecretsManager throws on an all-same-char key', () => {
+    expect(() => new SecretsManager('a'.repeat(32))).toThrow();
+  });
+
+  it('createSessionVault accepts a strong random key', () => {
+    const prev = process.env.MASTER_KEY;
+    try {
+      process.env.MASTER_KEY = 'master-key-0123456789abcdef0123456789abcdef';
+      expect(createSessionVault()).toBeDefined();
+    } finally {
+      if (prev !== undefined) process.env.MASTER_KEY = prev;
+      else delete process.env.MASTER_KEY;
+    }
   });
 });

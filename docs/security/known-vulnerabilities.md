@@ -49,3 +49,12 @@ findings remaining.
 The Browser Gateway/MCP must not release with open **high/critical** runtime
 findings without an explicit, documented exception. Moderate findings are
 tracked here and re-evaluated on each dependency upgrade.
+
+## Operational limitation: file-backed approval registry is single-writer
+
+`FileApprovalRegistry` uses reload -> mutate -> persist without inter-process
+locking/CAS, so the one-time token guarantee is **not atomic across multiple
+simultaneous gateway processes**. The current V1 topology is a single MCP
+server + a local operator CLI (one writer at a time), which is safe. This is an
+accepted V1 limitation; a lock/transactional store should be added if multiple
+concurrent gateway processes ever share the same approval file.

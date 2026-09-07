@@ -181,7 +181,7 @@ describe('BrowserGateway facade (US-001)', () => {
     const primary = new FakeEngine('obscura', success('obscura'));
     const fallback = new FakeEngine('playwright', success('playwright'));
     const telemetry = new CapturingTelemetry();
-    const registry = new HmacApprovalRegistry('test-secret');
+    const registry = new HmacApprovalRegistry('test-secret-0123456789abcdef0123456789abcdef');
     const gateway = buildGateway(primary, fallback, telemetry, { approvalRegistry: registry });
 
     const blocked = await gateway.executeTask(
@@ -246,7 +246,7 @@ describe('BrowserGateway facade (US-001)', () => {
     const primary = new FakeEngine('obscura', success('obscura'));
     const fallback = new FakeEngine('playwright', success('playwright'));
     const telemetry = new CapturingTelemetry();
-    const registry = new HmacApprovalRegistry('test-secret');
+    const registry = new HmacApprovalRegistry('test-secret-0123456789abcdef0123456789abcdef');
     const gateway = buildGateway(primary, fallback, telemetry, { approvalRegistry: registry });
 
     const blocked = await gateway.executeTask(
@@ -265,7 +265,7 @@ describe('BrowserGateway facade (US-001)', () => {
     const primary = new FakeEngine('obscura', success('obscura'));
     const fallback = new FakeEngine('playwright', success('playwright'));
     const telemetry = new CapturingTelemetry();
-    const registry = new HmacApprovalRegistry('test-secret');
+    const registry = new HmacApprovalRegistry('test-secret-0123456789abcdef0123456789abcdef');
     const gateway = buildGateway(primary, fallback, telemetry, { approvalRegistry: registry });
 
     const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'click', target: '#buy' });
@@ -283,7 +283,7 @@ describe('BrowserGateway facade (US-001)', () => {
     const primary = new FakeEngine('obscura', success('obscura'));
     const fallback = new FakeEngine('playwright', success('playwright'));
     const telemetry = new CapturingTelemetry();
-    const registry = new HmacApprovalRegistry('test-secret');
+    const registry = new HmacApprovalRegistry('test-secret-0123456789abcdef0123456789abcdef');
     const gateway = buildGateway(primary, fallback, telemetry, { approvalRegistry: registry });
 
     const result = await gateway.executeTask(task({ action: { type: 'click', target: '#next' } }));
@@ -299,7 +299,7 @@ describe('BrowserGateway facade (US-001)', () => {
       const primary = new FakeEngine('obscura', success('obscura'));
       const fallback = new FakeEngine('playwright', success('playwright'));
       const telemetry = new CapturingTelemetry();
-      const registry = new HmacApprovalRegistry('test-secret');
+      const registry = new HmacApprovalRegistry('test-secret-0123456789abcdef0123456789abcdef');
       const gateway = buildGateway(primary, fallback, telemetry, { approvalRegistry: registry });
 
       // @ts-expect-error — intentionally omit sideEffect on an irreversible target.
@@ -346,7 +346,7 @@ describe('BrowserGateway facade (US-001)', () => {
       const primary = new FakeEngine('obscura', success('obscura'));
       const fallback = new FakeEngine('playwright', success('playwright'));
       const telemetry = new CapturingTelemetry();
-      const registry = new HmacApprovalRegistry('test-secret');
+      const registry = new HmacApprovalRegistry('test-secret-0123456789abcdef0123456789abcdef');
       const gateway = buildGateway(primary, fallback, telemetry, { approvalRegistry: registry });
 
       const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'click', target: '#buy' });
@@ -433,7 +433,7 @@ describe('BrowserGateway facade (US-001)', () => {
       const primary = new FakeEngine('obscura', success('obscura'));
       const fallback = new FakeEngine('playwright', success('playwright'));
       const telemetry = new CapturingTelemetry();
-      const registry = new HmacApprovalRegistry('test-secret');
+      const registry = new HmacApprovalRegistry('test-secret-0123456789abcdef0123456789abcdef');
       const gateway = buildGateway(primary, fallback, telemetry, { approvalRegistry: registry });
 
       // A token for a different task does not approve this unknown click.
@@ -497,7 +497,7 @@ describe('BrowserGateway facade (US-001)', () => {
       const primary = new FakeEngine('obscura', success('obscura'));
       const fallback = new FakeEngine('playwright', success('playwright'));
       const telemetry = new CapturingTelemetry();
-      const registry = new HmacApprovalRegistry('test-secret');
+      const registry = new HmacApprovalRegistry('test-secret-0123456789abcdef0123456789abcdef');
       const gateway = buildGateway(primary, fallback, telemetry, { approvalRegistry: registry });
 
       const blocked = await gateway.executeTask(
@@ -531,7 +531,7 @@ describe('BrowserGateway facade (US-001)', () => {
       const primary = new FakeEngine('obscura', success('obscura'));
       const fallback = new FakeEngine('playwright', success('playwright'));
       const telemetry = new CapturingTelemetry();
-      const registry = new HmacApprovalRegistry('test-secret');
+      const registry = new HmacApprovalRegistry('test-secret-0123456789abcdef0123456789abcdef');
       const gateway = buildGateway(primary, fallback, telemetry, { approvalRegistry: registry });
 
       // 1) Task is blocked and a pending approval is created.
@@ -564,7 +564,7 @@ describe('BrowserGateway facade (US-001)', () => {
       const primary = new FakeEngine('obscura', success('obscura'));
       const fallback = new FakeEngine('playwright', success('playwright'));
       const telemetry = new CapturingTelemetry();
-      const registry = new HmacApprovalRegistry('test-secret');
+      const registry = new HmacApprovalRegistry('test-secret-0123456789abcdef0123456789abcdef');
       const gateway = buildGateway(primary, fallback, telemetry, { approvalRegistry: registry });
 
       const blocked = await gateway.executeTask(
