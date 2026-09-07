@@ -89,7 +89,8 @@ jobs:
 
       - name: Check for secrets
         run: |
-          if grep -r "MASTER_KEY.*=.*[a-f0-9]\{32,\}" . --exclude-dir=node_modules --exclude-dir=.git --exclude="*.md" --exclude=".env.example"; then
+          # Exclude test fixtures (test-only MASTER_KEY constants) and docs.
+          if grep -r "MASTER_KEY.*=.*[a-f0-9]\{32,\}" . --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=tests --exclude="*.md" --exclude=".env.example"; then
             echo "⚠️  Potential hardcoded secrets found!"
             exit 1
           fi

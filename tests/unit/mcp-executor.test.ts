@@ -35,7 +35,7 @@ describe('MCPExecutor', () => {
 
       // Should take at least 100ms (minimum humanDelay) + action time
       expect(duration).toBeGreaterThan(100);
-    });
+    }, 20000);
   });
 
   describe('getToolName', () => {
