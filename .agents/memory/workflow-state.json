@@ -1,7 +1,7 @@
 {
   "currentFeature": "browser-gateway-mvp",
-  "currentStage": "final-report",
-  "status": "done",
+  "currentStage": "ready-for-external-audit",
+  "status": "ready-for-external-audit",
   "source": "docs/user-stories/US-004-browser-gateway-usable-v1.md",
   "branch": "feat/browser-gateway-mvp",
   "stages": {
@@ -11,6 +11,17 @@
     "implementation": "done",
     "quality": "done",
     "independent-review": "done",
-    "final-report": "done"
+    "final-report": "done",
+    "external-audit": "pending"
+  },
+  "evidence": {
+    "commits": "83cf166..5ff1033",
+    "pr": "https://github.com/jagzao/mcp_playwright/pull/5",
+    "ci": "4/4 green (Test & Build 18.x/20.x, Lint, Security Audit)",
+    "unitTests": 247,
+    "integrationGatewayTests": 8,
+    "smoke": "PASS",
+    "issue4Comment": "https://github.com/jagzao/mcp_playwright/issues/4#issuecomment-5573461654",
+    "knownFailure": "tests/integration/agent-flow.test.ts (legacy AgentOrchestrator Qwen endpoint; pre-existing, unrelated to gateway)"
   }
 }
