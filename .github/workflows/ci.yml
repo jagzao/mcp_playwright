@@ -76,7 +76,7 @@ jobs:
       # without failing the build. TypeScript typecheck (in the test job) is the
       # real static-analysis gate.
       - name: Run ESLint (informational)
-        run: npx eslint . --ext .ts,.js || echo "ESLint: no config / informational only (not a gate)"
+        run: 'npx eslint . --ext .ts,.js || echo "ESLint: no config / informational only (not a gate)"'
 
   security:
     name: Security Audit (real gate)
