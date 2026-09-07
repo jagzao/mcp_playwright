@@ -99,8 +99,11 @@ export class BrowserGateway {
     const llm = this.options.llmRouter.current();
 
     // 1) Network / SSRF policy — trusted policy applied regardless of engine.
-    if (task.action.type === 'navigate') {
-      const verdict = this.networkPolicy.assess(task.action.url);
+    //    Applies to both `navigate` and `follow_link` (both resolve a destination
+    //    URL), so a private/loopback href is denied before any engine runs.
+    if (task.action.type === 'navigate' || task.action.type === 'follow_link') {
+      const url = task.action.type === 'navigate' ? task.action.url : task.action.href;
+      const verdict = this.networkPolicy.assess(url);
       if (!verdict.ok) {
         return this.blocked(
           task,
@@ -116,12 +119,32 @@ export class BrowserGateway {
     //    switching engines.
     const safety = this.safetyGate.assess(task);
     if (safety.status === 'approval_required') {
+      // Create a pending approval so a human operator can approve the exact
+      // action (BLOCKER-E). The pendingId is returned in the blocked result so
+      // the caller/operator knows what to approve. If no registry is configured,
+      // pendingId is omitted.
+      let pendingId: string | undefined;
+      if (this.options.approvalRegistry) {
+        const pending = this.options.approvalRegistry.createPending({
+          taskId: task.taskId,
+          sessionId: task.sessionId,
+          actionType: task.action.type,
+          target:
+            task.action.type === 'click'
+              ? task.action.target
+              : task.action.type === 'follow_link'
+                ? task.action.href
+                : undefined,
+        });
+        pendingId = pending.pendingId;
+      }
       return this.blocked(
         task,
         llm,
         'approval_required',
         safety.reason,
         Date.now() - start,
+        pendingId,
       );
     }
 
@@ -171,6 +194,7 @@ export class BrowserGateway {
     category: 'security_blocked' | 'approval_required' | 'invalid_request',
     reason: string,
     durationMs: number,
+    pendingId?: string,
   ): BrowserGatewayResult<T> {
     const telemetry: BrowserExecutionTelemetry & {
       status: string;
@@ -188,7 +212,7 @@ export class BrowserGateway {
       redactedErrorCategory: category,
     };
     this.telemetry.emitExecutionSummary(telemetry);
-    return { status: 'blocked', category, reason, telemetry };
+    return { status: 'blocked', category, reason, telemetry, ...(pendingId ? { pendingId } : {}) };
   }
 
   private complete<T>(

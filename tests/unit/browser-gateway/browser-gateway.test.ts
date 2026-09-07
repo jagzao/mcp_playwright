@@ -279,15 +279,19 @@ describe('BrowserGateway facade (US-001)', () => {
     expect(primary.executeCalls).toBe(1);
   });
 
-  it('BLOCKER-2: a plain/read click (no effect flag) stays auto-allowed', async () => {
+  it('HIGH-D: a plain/read click (no effect flag) is now blocked (approval_required)', async () => {
     const primary = new FakeEngine('obscura', success('obscura'));
     const fallback = new FakeEngine('playwright', success('playwright'));
     const telemetry = new CapturingTelemetry();
-    const gateway = buildGateway(primary, fallback, telemetry);
+    const registry = new HmacApprovalRegistry('test-secret');
+    const gateway = buildGateway(primary, fallback, telemetry, { approvalRegistry: registry });
 
     const result = await gateway.executeTask(task({ action: { type: 'click', target: '#next' } }));
-    expect(result.status).toBe('success');
-    expect(primary.executeCalls).toBe(1);
+    expect(result.status).toBe('blocked');
+    if (result.status === 'blocked') {
+      expect(result.category).toBe('approval_required');
+    }
+    expect(primary.executeCalls).toBe(0);
   });
 
   describe('HIGH-B: gateway-level, caller cannot downgrade an irreversible click', () => {
@@ -357,7 +361,7 @@ describe('BrowserGateway facade (US-001)', () => {
       expect(primary.executeCalls).toBe(1);
     });
 
-    it('a reversible/navigation click with an explicit sideEffect:"read" stays auto-allowed', async () => {
+    it('HIGH-D: a reversible/navigation click with an explicit sideEffect:"read" is now blocked', async () => {
       const primary = new FakeEngine('obscura', success('obscura'));
       const fallback = new FakeEngine('playwright', success('playwright'));
       const telemetry = new CapturingTelemetry();
@@ -366,8 +370,11 @@ describe('BrowserGateway facade (US-001)', () => {
       const result = await gateway.executeTask(
         task({ action: { type: 'click', target: '#next', sideEffect: 'read' } }),
       );
-      expect(result.status).toBe('success');
-      expect(primary.executeCalls).toBe(1);
+      expect(result.status).toBe('blocked');
+      if (result.status === 'blocked') {
+        expect(result.category).toBe('approval_required');
+      }
+      expect(primary.executeCalls).toBe(0);
     });
   });
 
@@ -449,6 +456,144 @@ describe('BrowserGateway facade (US-001)', () => {
         }),
       );
       expect(approved.status).toBe('success');
+      expect(primary.executeCalls).toBe(1);
+    });
+  });
+
+  describe('follow_link (HIGH-D)', () => {
+    it('follow_link is auto-allowed and executes on the primary engine', async () => {
+      const primary = new FakeEngine('obscura', success('obscura'));
+      const fallback = new FakeEngine('playwright', success('playwright'));
+      const telemetry = new CapturingTelemetry();
+      const gateway = buildGateway(primary, fallback, telemetry);
+
+      const result = await gateway.executeTask(
+        task({ action: { type: 'follow_link', href: 'https://example.com/about' } }),
+      );
+      expect(result.status).toBe('success');
+      expect(primary.executeCalls).toBe(1);
+    });
+
+    it('a follow_link with a private/loopback href is blocked by network policy', async () => {
+      const primary = new FakeEngine('obscura', success('obscura'));
+      const fallback = new FakeEngine('playwright', success('playwright'));
+      const telemetry = new CapturingTelemetry();
+      const gateway = buildGateway(primary, fallback, telemetry);
+
+      const result = await gateway.executeTask(
+        task({ action: { type: 'follow_link', href: 'http://127.0.0.1/admin' } }),
+      );
+      expect(result.status).toBe('blocked');
+      if (result.status === 'blocked') {
+        expect(result.category).toBe('security_blocked');
+      }
+      expect(primary.executeCalls).toBe(0);
+      expect(fallback.executeCalls).toBe(0);
+    });
+  });
+
+  describe('BLOCKER-E: approval flow (pending -> operator approve -> one-time token)', () => {
+    it('a blocked approval_required result includes a pendingId', async () => {
+      const primary = new FakeEngine('obscura', success('obscura'));
+      const fallback = new FakeEngine('playwright', success('playwright'));
+      const telemetry = new CapturingTelemetry();
+      const registry = new HmacApprovalRegistry('test-secret');
+      const gateway = buildGateway(primary, fallback, telemetry, { approvalRegistry: registry });
+
+      const blocked = await gateway.executeTask(
+        task({ action: { type: 'click', target: '#delete-account' } }),
+      );
+      expect(blocked.status).toBe('blocked');
+      if (blocked.status === 'blocked') {
+        expect(blocked.category).toBe('approval_required');
+        expect(blocked.pendingId).toBeTruthy();
+        expect(registry.getPending(blocked.pendingId!)).toBeDefined();
+      }
+      expect(primary.executeCalls).toBe(0);
+    });
+
+    it('a blocked approval_required result omits pendingId when no registry is configured', async () => {
+      const primary = new FakeEngine('obscura', success('obscura'));
+      const fallback = new FakeEngine('playwright', success('playwright'));
+      const telemetry = new CapturingTelemetry();
+      const gateway = buildGateway(primary, fallback, telemetry);
+
+      const blocked = await gateway.executeTask(
+        task({ action: { type: 'click', target: '#delete-account' } }),
+      );
+      expect(blocked.status).toBe('blocked');
+      if (blocked.status === 'blocked') {
+        expect(blocked.pendingId).toBeUndefined();
+      }
+    });
+
+    it('after registry.approve(pendingId, "operator") the exact action executes with the returned token', async () => {
+      const primary = new FakeEngine('obscura', success('obscura'));
+      const fallback = new FakeEngine('playwright', success('playwright'));
+      const telemetry = new CapturingTelemetry();
+      const registry = new HmacApprovalRegistry('test-secret');
+      const gateway = buildGateway(primary, fallback, telemetry, { approvalRegistry: registry });
+
+      // 1) Task is blocked and a pending approval is created.
+      const blocked = await gateway.executeTask(
+        task({ action: { type: 'click', target: '#delete-account' } }),
+      );
+      expect(blocked.status).toBe('blocked');
+      if (blocked.status !== 'blocked') return;
+      const pendingId = blocked.pendingId!;
+      expect(pendingId).toBeTruthy();
+
+      // 2) Operator approves the pending request (trusted channel).
+      const approved = registry.approve(pendingId, 'operator');
+      expect(approved.ok).toBe(true);
+      if (!approved.ok) return;
+      const token = approved.token;
+
+      // 3) Retry the exact action with the one-time token -> executes.
+      const executed = await gateway.executeTask(
+        task({
+          action: { type: 'click', target: '#delete-account' },
+          approval: { approved: true, approvalId: token.approvalId, signature: token.signature },
+        }),
+      );
+      expect(executed.status).toBe('success');
+      expect(primary.executeCalls).toBe(1);
+    });
+
+    it('the one-time token cannot be replayed (second verify fails)', async () => {
+      const primary = new FakeEngine('obscura', success('obscura'));
+      const fallback = new FakeEngine('playwright', success('playwright'));
+      const telemetry = new CapturingTelemetry();
+      const registry = new HmacApprovalRegistry('test-secret');
+      const gateway = buildGateway(primary, fallback, telemetry, { approvalRegistry: registry });
+
+      const blocked = await gateway.executeTask(
+        task({ action: { type: 'click', target: '#delete-account' } }),
+      );
+      if (blocked.status !== 'blocked') return;
+      const approved = registry.approve(blocked.pendingId!, 'operator');
+      if (!approved.ok) return;
+      const token = approved.token;
+
+      const first = await gateway.executeTask(
+        task({
+          action: { type: 'click', target: '#delete-account' },
+          approval: { approved: true, approvalId: token.approvalId, signature: token.signature },
+        }),
+      );
+      expect(first.status).toBe('success');
+
+      // Replay the same token -> blocked (one-time / replay protection).
+      const replay = await gateway.executeTask(
+        task({
+          action: { type: 'click', target: '#delete-account' },
+          approval: { approved: true, approvalId: token.approvalId, signature: token.signature },
+        }),
+      );
+      expect(replay.status).toBe('blocked');
+      if (replay.status === 'blocked') {
+        expect(replay.category).toBe('approval_required');
+      }
       expect(primary.executeCalls).toBe(1);
     });
   });

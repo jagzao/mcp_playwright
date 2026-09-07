@@ -71,7 +71,7 @@ The gateway is exposed as MCP tools (all prefixed `gateway_`). These are thin tr
 | --- | --- |
 | `gateway_host_create_session` | Create a persistent BrowserHost session (browser stays open across turns). |
 | `gateway_suspend_for_user` | Suspend a session for a human (login/MFA/CAPTCHA). Browser stays open; returns a resumable checkpoint. |
-| `gateway_resume` | Resume a suspended session from its checkpoint (same live tab, no task restatement). |
+| `gateway_resume` | Resume a suspended session from its checkpoint (reconstructed continuity — see note below). |
 | `gateway_list_waiting` | List sessions currently waiting for a human. |
 | `gateway_session_status` | Report the status of a BrowserHost session. |
 | `gateway_host_close_session` | Explicitly close a persistent BrowserHost session (always wins). |
@@ -177,9 +177,11 @@ npm run dev -- gateway:suspend my-task "login required" --instructions "Sign in 
 # 3. List waiting sessions
 npm run dev -- gateway:waiting
 
-# 4. Resume from the checkpoint (same live tab, no task restatement)
+# 4. Resume from the checkpoint (reconstructed continuity — see note below)
 npm run dev -- gateway:resume my-task <checkpointId>
 ```
+
+> **Note on headless → headed takeover (reconstructed continuity):** when a session is promoted from headless to headed for a human takeover, the gateway does **not** guarantee the literal same `Page`/process survives. It captures the useful page URL + auth state, closes the headless browser, reopens headed, and restores the URL + storage. This is **reconstructed continuity** — the same logical task/session continues, but it is a new browser/context. For critical authenticated workflows that will need human takeover, start the session headed from the beginning.
 
 ### Research quick / standard / deep
 
@@ -188,6 +190,51 @@ npm run dev -- research "What is the Browser Agent Gateway?" --mode quick
 npm run dev -- research "Compare Playwright and Obscura for browser automation" --mode standard
 npm run dev -- research "Deep dive: SSRF protections in browser automation" --mode deep
 ```
+
+---
+
+## Approval flow (side effects & raw clicks)
+
+A raw `click` and any irreversible external side effect (`submit`, `send`, `publish`) are **never** auto-executed. A bare `approval: { approved: true }` on a task is **not** trusted and is always rejected — a hostile agent could self-approve any side effect. Instead, the gateway uses a **trusted, one-time human approval workflow**:
+
+```text
+approval_required -> pending approval -> trusted human/operator approval
+  -> one-time token -> execute the exact approved action once
+```
+
+1. **Task is blocked.** `gateway_execute` returns `status: "blocked"`, `category: "approval_required"`, and a `pendingId` (the pending approval created for the exact task/session/action/target).
+2. **Operator lists pending approvals** (local control-plane, not exposed to MCP callers):
+   ```bash
+   npm run dev -- gateway:approval-pending
+   ```
+3. **Trusted human/operator approves** the exact pending request and receives a **one-time token**:
+   ```bash
+   npm run dev -- gateway:approve <pendingId>
+   # prints: One-time token: { "approvalId": "...", "signature": "..." }
+   ```
+   The token is bound to the exact `taskId`/`sessionId`/`actionType`/`target`, expires after a TTL, and can be revoked. It is **one-time** — replaying it is rejected.
+4. **Retry the exact action** with the token:
+   ```json
+   {
+     "taskId": "...",
+     "sessionId": "...",
+     "action": { "type": "click", "target": "#delete-account" },
+     "approval": { "approved": true, "approvalId": "<approvalId>", "signature": "<signature>" }
+   }
+   ```
+   The action executes **exactly once**. The same token cannot approve a different target/task/session, and cannot be replayed.
+
+> **Security:** the `approve` step is only reachable through the local operator CLI (`gateway:approve`). The MCP `gateway_execute` surface only *verifies* tokens — an untrusted MCP caller can never self-approve.
+
+### Safe navigation: use `follow_link`, not raw `click`
+
+Because a raw `click` can fire a page's `onclick` JavaScript (which may perform an irreversible action even on a link that *looks* like navigation), raw clicks are always approval-required. For **safe, reversible navigation**, use the dedicated semantic action `follow_link`, which resolves a link's `href` and navigates **without** firing the element's `onclick` JS:
+
+```json
+{ "type": "follow_link", "href": "https://example.com/about" }
+```
+
+`follow_link` is read-only/reversible and auto-allowed (subject to the SSRF/private-network policy). Prefer it over `click` whenever you only need to follow a link.
 
 ---
 
@@ -202,7 +249,7 @@ The gateway returns **typed outcomes** you can branch on. Here is what each mean
 | `user_interaction_required` | A human must intervene (login/MFA/CAPTCHA). | Use the wait/resume flow (`gateway:suspend` → human acts → `gateway:resume`). |
 | `manual_escalation_required` | Both controlled engines could not complete the task. | The task needs manual handling; the gateway never pretends the Codex browser was invoked. |
 | `security_blocked` | Navigation was denied by the network/SSRF policy (e.g. private/loopback target). | Use a public `http(s)` URL, or explicitly allow private network if appropriate. |
-| `approval_required` | An irreversible external side-effect requires approval. | Provide an explicit `approval: { approved: true }` on the task. |
+| `approval_required` | An irreversible external side-effect (or any raw `click`) requires human approval. | Use the real approval flow below — a bare `approval: { approved: true }` is **never** sufficient. |
 
 ---
 

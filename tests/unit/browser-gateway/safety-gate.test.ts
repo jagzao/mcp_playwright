@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SafetyGate } from '../../../lib/browser-gateway/application/safety-gate.js';
+import { SafetyGate, READ_ONLY_ACTION_TYPES } from '../../../lib/browser-gateway/application/safety-gate.js';
 import { HmacApprovalRegistry } from '../../../lib/browser-gateway/application/approval-registry.js';
 import type { BrowserTask } from '../../../lib/browser-gateway/domain/browser-task.js';
 
@@ -57,12 +57,12 @@ describe('SafetyGate (US-001)', () => {
     expect(gate.assess(task({ type: 'submit', target: '#form' })).status).toBe('allowed');
   });
 
-  describe('side-effect clicks (BLOCKER-2)', () => {
-    it('a plain/read click (no effect flag) is auto-allowed', () => {
+  describe('side-effect clicks (BLOCKER-2 / HIGH-D)', () => {
+    it('a raw click (no effect flag) is ALWAYS approval-required (HIGH-D)', () => {
       const gate = new SafetyGate(true);
-      expect(gate.assess(task({ type: 'click', target: '#next' })).status).toBe('allowed');
+      expect(gate.assess(task({ type: 'click', target: '#next' })).status).toBe('approval_required');
       expect(gate.assess(task({ type: 'click', target: '#next', sideEffect: 'read' } as any)).status).toBe(
-        'allowed',
+        'approval_required',
       );
     });
 
@@ -83,7 +83,7 @@ describe('SafetyGate (US-001)', () => {
       ).toBe('approval_required');
     });
 
-    it('a click with sideEffect=\"side_effect\" is approval-required without a token', () => {
+    it('a click with sideEffect="side_effect" is approval-required without a token', () => {
       const gate = new SafetyGate(true);
       expect(
         gate.assess(task({ type: 'click', target: '#submit', sideEffect: 'side_effect' } as any)).status,
@@ -119,7 +119,6 @@ describe('SafetyGate (US-001)', () => {
 
   describe('HIGH-B: caller cannot downgrade an irreversible click', () => {
     const sideEffectTargets = ['#publish', '#buy', '#submit', '#delete', '#send', '#purchase', '#checkout', '#transfer'];
-    const readTargets = ['#next', '#nav-home', 'a[href="/docs"]', '.pagination', '#expand'];
 
     it('a raw click WITHOUT sideEffect on a side-effect-like target is approval_required (fail-safe)', () => {
       const gate = new SafetyGate(true);
@@ -151,11 +150,12 @@ describe('SafetyGate (US-001)', () => {
       expect(verdict.status).toBe('approval_required');
     });
 
-    it('a genuinely reversible / navigation click stays auto-allowed (ergonomic path preserved)', () => {
+    it('HIGH-D: a raw click on a previously-safe selector is now approval_required (no auto-allow)', () => {
       const gate = new SafetyGate(true);
+      const readTargets = ['#next', '#nav-home', 'a[href="/docs"]', '.pagination', '#expand'];
       for (const target of readTargets) {
-        // @ts-expect-error — no sideEffect, reversible target stays auto-allowed.
-        expect(gate.assess(task({ type: 'click', target })).status).toBe('allowed');
+        // @ts-expect-error — no sideEffect; previously-safe selectors are now unknown.
+        expect(gate.assess(task({ type: 'click', target })).status, `.assess ${target}`).toBe('approval_required');
       }
     });
 
@@ -169,12 +169,12 @@ describe('SafetyGate (US-001)', () => {
       }
     });
 
-    it('explicitly safe reversible controls stay auto-allowed (closed allow-list)', () => {
+    it('HIGH-D: explicitly safe reversible controls are now approval_required too (no auto-allow)', () => {
       const gate = new SafetyGate(true);
       const safeTargets = ['#expand', '.accordion', '.collapse', '.close-modal', '.dismiss', '.back', '.cancel'];
       for (const target of safeTargets) {
-        // @ts-expect-error — no sideEffect, explicit safe class stays auto-allowed.
-        expect(gate.assess(task({ type: 'click', target })).status, `.assess #${target}`).toBe('allowed');
+        // @ts-expect-error — no sideEffect; previously-safe classes are now unknown.
+        expect(gate.assess(task({ type: 'click', target })).status, `.assess #${target}`).toBe('approval_required');
       }
     });
 
@@ -219,12 +219,12 @@ describe('SafetyGate (US-001)', () => {
       ).toBe('approval_required');
     });
 
-    it('5. safe known navigation/tab/pagination click stays auto-allowed', () => {
+    it('5. HIGH-D: previously-safe navigation/tab/pagination clicks are now approval_required', () => {
       const gate = new SafetyGate(true);
-      expect(gate.assess(task({ type: 'click', target: '#next' })).status).toBe('allowed');
-      expect(gate.assess(task({ type: 'click', target: '[role="tab"]' })).status).toBe('allowed');
-      expect(gate.assess(task({ type: 'click', target: '.pagination' })).status).toBe('allowed');
-      expect(gate.assess(task({ type: 'click', target: 'a[href="/about"]' })).status).toBe('allowed');
+      expect(gate.assess(task({ type: 'click', target: '#next' })).status).toBe('approval_required');
+      expect(gate.assess(task({ type: 'click', target: '[role="tab"]' })).status).toBe('approval_required');
+      expect(gate.assess(task({ type: 'click', target: '.pagination' })).status).toBe('approval_required');
+      expect(gate.assess(task({ type: 'click', target: 'a[href="/about"]' })).status).toBe('approval_required');
     });
 
     it('6. approved token for an unknown/side-effect click allows ONLY the exact authorized target', () => {
@@ -272,6 +272,17 @@ describe('SafetyGate (US-001)', () => {
           ),
         ).status,
       ).toBe('allowed');
+    });
+  });
+
+  describe('follow_link (HIGH-D)', () => {
+    it('follow_link is read-only and auto-allowed', () => {
+      const gate = new SafetyGate(true);
+      expect(gate.assess(task({ type: 'follow_link', href: 'https://example.com/about' })).status).toBe('allowed');
+    });
+
+    it('follow_link is in READ_ONLY_ACTION_TYPES', () => {
+      expect(READ_ONLY_ACTION_TYPES.has('follow_link')).toBe(true);
     });
   });
 });

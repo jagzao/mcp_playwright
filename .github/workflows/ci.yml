@@ -42,9 +42,8 @@ jobs:
       - name: Run TypeScript compilation
         run: npm run build
 
-      - name: Run tests
-        run: npm test || echo "Tests not configured yet"
-        continue-on-error: true
+      - name: Run unit tests (real gate)
+        run: npm run test:unit
 
       - name: Check for TypeScript errors
         run: npx tsc --noEmit

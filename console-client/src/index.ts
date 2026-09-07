@@ -8,6 +8,7 @@ import { validateConfig } from '../../lib/config/index.js';
 import { logger } from '../../lib/observability/logger.js';
 import { createBrowserHost } from '../../lib/browser-gateway/infrastructure/gateway-factory.js';
 import { createSessionVault } from '../../lib/browser-gateway/infrastructure/gateway-factory.js';
+import { createApprovalRegistry } from '../../lib/browser-gateway/infrastructure/gateway-factory.js';
 import chalk from 'chalk';
 
 const program = new Command();
@@ -220,6 +221,52 @@ program
   });
 
 // --- SessionVault / durable authenticated sessions CLI (US-002) --------------
+
+program
+  .command('gateway:approval-pending')
+  .description('List pending approvals (pendingId, actionType, target, expiresAt) for the operator')
+  .action(() => {
+    const registry = createApprovalRegistry();
+    const pendings = registry.listPending().filter((p) => p.status === 'pending');
+    if (!pendings.length) {
+      console.log(chalk.gray('No pending approvals.'));
+      return;
+    }
+    for (const p of pendings) {
+      console.log(
+        chalk.yellow(p.pendingId),
+        '|',
+        p.request.actionType,
+        '| target:',
+        p.request.target ?? '(none)',
+        '| expires:',
+        new Date(p.expiresAt).toISOString(),
+      );
+    }
+  });
+
+program
+  .command('gateway:approve <pendingId>')
+  .description('Approve a pending approval (trusted human/operator action). Prints the one-time token')
+  .action((pendingId) => {
+    const registry = createApprovalRegistry();
+    const pending = registry.getPending(pendingId);
+    if (!pending) {
+      console.error(chalk.red('Unknown pending approval:'), pendingId);
+      process.exit(1);
+    }
+    const result = registry.approve(pendingId, 'operator');
+    if (!result.ok) {
+      console.error(chalk.red('Approve failed:'), result.reason);
+      process.exit(1);
+    }
+    console.log(chalk.green('Approved:'), pendingId);
+    console.log('bound request:', pending.request.actionType, '| target:', pending.request.target ?? '(none)');
+    console.log('taskId:', pending.request.taskId, '| sessionId:', pending.request.sessionId);
+    console.log(chalk.cyan('One-time token:'));
+    console.log(JSON.stringify(result.token));
+    console.log(chalk.gray('Hand this token to the agent to retry gateway_execute with approval.approvalId + approval.signature.'));
+  });
 
 program
   .command('gateway:session-register <profileId>')

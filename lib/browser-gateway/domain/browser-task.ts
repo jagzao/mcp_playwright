@@ -1,5 +1,16 @@
 export type BrowserAction =
   | { type: 'navigate'; url: string }
+  | {
+      type: 'follow_link';
+      href: string;
+      /**
+       * Resolves a link's destination and navigates WITHOUT firing the element's
+       * onclick JS. Read-only/reversible (auto-allowed, like `navigate`). The
+       * engine implements it by navigating to the resolved href directly
+       * (page.goto), NOT by clicking the element. This is the trusted way to
+       * follow a link without trusting the page's onclick handler.
+       */
+    }
   | { type: 'snapshot' }
   | {
       type: 'click';

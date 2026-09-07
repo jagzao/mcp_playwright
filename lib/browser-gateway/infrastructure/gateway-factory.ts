@@ -1,7 +1,8 @@
 import { BrowserGateway, type GatewayOptions } from '../application/browser-gateway.js';
 import { BrowserHost, type BrowserHostOptions } from '../application/browser-host.js';
 import { LlmOperatorRouter } from '../application/llm-operator-router.js';
-import { HmacApprovalRegistry } from '../application/approval-registry.js';
+import { HmacApprovalRegistry, type ApprovalRegistry } from '../application/approval-registry.js';
+import { FileApprovalRegistry } from './approval-registry-file.js';
 import { ObscuraEngine } from './engines/obscura/obscura-engine.js';
 import { PlaywrightEngine } from './engines/playwright/playwright-engine.js';
 import { PlaywrightBrowserRuntime } from './engines/playwright/playwright-browser-runtime.js';
@@ -33,7 +34,7 @@ export function createGateway(overrides?: Partial<GatewayOptions>): BrowserGatew
     llmRouter,
     requireApprovalForSideEffects:
       process.env.BROWSER_REQUIRE_APPROVAL_FOR_SIDE_EFFECTS !== 'false',
-    approvalRegistry: new HmacApprovalRegistry(),
+    approvalRegistry: createApprovalRegistry(),
   };
 
   if (overrides?.safetyGate) options.safetyGate = overrides.safetyGate;
@@ -42,8 +43,24 @@ export function createGateway(overrides?: Partial<GatewayOptions>): BrowserGatew
   if (overrides?.requireApprovalForSideEffects !== undefined) {
     options.requireApprovalForSideEffects = overrides.requireApprovalForSideEffects;
   }
+  if (overrides?.approvalRegistry) options.approvalRegistry = overrides.approvalRegistry;
 
   return new BrowserGateway(options);
+}
+
+/**
+ * Create the default approval registry. Prefers the file-backed registry so the
+ * operator CLI (a separate process) can see and approve pending requests
+ * created by the MCP server. Falls back to the in-memory registry if the file
+ * store is unavailable.
+ */
+export function createApprovalRegistry(): ApprovalRegistry {
+  try {
+    return new FileApprovalRegistry();
+  } catch (error: any) {
+    // Fall back to in-memory if the file store is unavailable.
+    return new HmacApprovalRegistry();
+  }
 }
 
 /**

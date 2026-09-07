@@ -22,6 +22,7 @@ npm-debug.log*
 data/sessions/
 data/checkpoints/
 data/agent-memory/
+data/approvals/
 backups/
 *.enc
 

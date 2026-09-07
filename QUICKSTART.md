@@ -67,3 +67,23 @@ The offline smoke uses a fake search provider, so no API key is needed. To use r
 | `MASTER_KEY` too short | Set a 32+ character random string in `.env` |
 | Research returns `no_search_provider_available` | Set a search API key, or use the offline smoke (fake provider) |
 | Navigation returns `security_blocked` | Use a public `http(s)` URL (private/loopback is denied by default) |
+| `approval_required` | A raw `click` or irreversible side effect needs human approval. A bare `approval: { approved: true }` is **never** enough. Run `npm run dev -- gateway:approval-pending`, then `npm run dev -- gateway:approve <pendingId>` to get a one-time token, and retry the exact action with it. See the README "Approval flow" section. |
+
+## Approving a side-effect / raw-click action
+
+Raw clicks and irreversible actions are never auto-executed. To approve one:
+
+```bash
+# 1. See what needs approval
+npm run dev -- gateway:approval-pending
+
+# 2. Approve the exact pending request (trusted human/operator action)
+npm run dev -- gateway:approve <pendingId>
+#   → prints a one-time token { approvalId, signature }
+
+# 3. Retry the exact action with the token (approval.approvalId + approval.signature)
+```
+
+For safe navigation, prefer `follow_link` (navigates to a link's href without firing its `onclick` JS) over a raw `click`.
+
+> **Headless → headed takeover** is **reconstructed continuity**: the gateway captures the URL + auth state, reopens headed, and restores them in a new browser/context. It is not a literal guarantee of the same `Page`/process. For critical authenticated workflows, start headed from the beginning.

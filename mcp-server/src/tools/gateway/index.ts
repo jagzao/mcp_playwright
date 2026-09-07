@@ -112,7 +112,14 @@ function resultToText(result: BrowserGatewayResult): string {
     return JSON.stringify({ status: 'success', data: result.data });
   }
   if (result.status === 'blocked') {
-    return JSON.stringify({ status: 'blocked', category: result.category, reason: result.reason });
+    // Include pendingId so a programmatic caller can correlate its blocked
+    // request to the pending approval the operator must approve (BLOCKER-E).
+    return JSON.stringify({
+      status: 'blocked',
+      category: result.category,
+      reason: result.reason,
+      ...(result.pendingId ? { pendingId: result.pendingId } : {}),
+    });
   }
   return JSON.stringify({ status: 'manual_escalation_required', reason: result.reason });
 }

@@ -75,6 +75,7 @@ export class ObscuraEngine implements BrowserEngine {
     if (!this.ready) return false;
     return [
       'navigate',
+      'follow_link',
       'snapshot',
       'click',
       'fill',

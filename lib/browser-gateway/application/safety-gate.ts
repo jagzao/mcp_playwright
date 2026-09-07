@@ -21,6 +21,7 @@ import { ClickPolicy } from './click-policy.js';
 // Action types that are pure read-only / reversible observations.
 const READ_ONLY_ACTION_TYPES = new Set([
   'navigate',
+  'follow_link',
   'snapshot',
   'extract',
   'screenshot',
@@ -44,13 +45,16 @@ export type SafetyVerdict =
  * the caller-supplied `sideEffect` flag is NOT trusted as the sole classifier a
  * hostile/mistaken agent can omit or rewrite to downgrade an irreversible click.
  *
- * The trusted `ClickPolicy` inspects the actual target/selector and classifies
- * it REGARDLESS of the caller flag. A click is auto-allowed ONLY when the
- * trusted policy positively classifies the target as `safe_read` (an explicit
- * safe/navigation class) AND the caller did not explicitly flag it as a side
- * effect. If the trusted policy says `side_effect` OR `unknown`, approval is
- * required — a caller can never downgrade a matched side-effect or ambiguous
- * click by omitting or rewriting `sideEffect` (HIGH-C fail-closed).
+ * HIGH-D: a raw `click` is ALWAYS treated as an external side effect
+ * (approval-required). The trusted `ClickPolicy` can no longer auto-allow a
+ * click based on the target/selector string, because that string is
+ * caller/page-controlled and a hostile page can put `role=tab`, `aria-expanded`,
+ * `data-nav`, or `a[href]` on a control that performs an external side effect.
+ * The trusted, reversible navigation path is the dedicated `follow_link`
+ * action (which navigates to the resolved href WITHOUT firing onclick JS), not
+ * a raw `click`. A raw click therefore always requires an explicit approval
+ * token unless a future trusted capability/domain policy grants it (none exists
+ * in V1).
  */
 function isExternalSideEffect(
   action: BrowserAction,
@@ -60,16 +64,11 @@ function isExternalSideEffect(
   if (!requireApprovalForSideEffects) return false;
   if (SIDE_EFFECT_ACTION_TYPES.has(action.type)) return true;
   if (action.type === 'click') {
-    // Trusted server-side classification wins over any caller claim.
-    const trusted = clickPolicy.classify(action);
-    const callerEffect = action.sideEffect ?? 'read';
-    // A caller's `sideEffect: 'read'` must NOT downgrade an `unknown` or
-    // `side_effect` click. Only a trusted `safe_read` classification combined
-    // with a non-side-effect caller flag is auto-allowed.
-    if (trusted === 'side_effect' || trusted === 'unknown') return true;
-    // trusted === 'safe_read': auto-allow unless the caller explicitly flagged
-    // it as a side effect.
-    return callerEffect === 'side_effect' || callerEffect === true;
+    // HIGH-D: a raw click is ALWAYS approval-required, regardless of the
+    // target/selector/attributes/metadata. The ClickPolicy classification is
+    // retained only for informational purposes; it can never auto-allow.
+    void clickPolicy.classify(action);
+    return true;
   }
   // A bare plain click on a reversible target is auto-allowed (see the
   // click branch above, which the ClickPolicy already cleared).
@@ -116,7 +115,12 @@ export class SafetyGate {
           // Bind the token to the exact reviewed target when the action targets
           // a specific selector, so approving `#btn-482` does NOT authorize a
           // click on `#delete-account`.
-          target: task.action.type === 'click' ? task.action.target : undefined,
+          target:
+            task.action.type === 'click'
+              ? task.action.target
+              : task.action.type === 'follow_link'
+                ? task.action.href
+                : undefined,
         },
       );
       if (ok) {

@@ -58,4 +58,11 @@ export type BrowserGatewayResult<T = unknown> =
       category: 'security_blocked' | 'approval_required' | 'invalid_request';
       reason: string;
       telemetry?: Partial<BrowserExecutionTelemetry>;
+      /**
+       * Present when a task is blocked as `approval_required` and a pending
+       * approval was created. The operator uses this `pendingId` to approve the
+       * exact action via the operator channel (CLI `gateway:approve`). Omitted
+       * when no approval registry is configured.
+       */
+      pendingId?: string;
     };

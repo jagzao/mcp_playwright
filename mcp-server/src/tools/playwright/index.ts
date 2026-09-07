@@ -5,6 +5,7 @@ import { retry } from "../../../../lib/resilience/retry.js";
 import { launchWithFallback } from "../../../../lib/browser-gateway/infrastructure/engines/playwright/launch-with-fallback.js";
 import { NetworkPolicy } from "../../../../lib/browser-gateway/application/network-policy.js";
 import { attachRequestGuard } from "../../../../lib/browser-gateway/infrastructure/engines/playwright/request-guard.js";
+import { createGateway } from "../../../../lib/browser-gateway/infrastructure/gateway-factory.js";
 import { setCurrentPage as setVisionPage } from "../vision/index.js";
 import { setCurrentPage as setSessionPage } from "../session/index.js";
 
@@ -141,6 +142,33 @@ export async function runClick(selector: string, timeout: number = 30000, sessio
   return { success: true, selector };
 }
 
+/**
+ * Follow a link by navigating to its resolved href directly (page.goto), NOT by
+ * clicking the element. This is the trusted, reversible way to follow a link
+ * without firing the element's onclick JS (HIGH-D). The URL is validated by the
+ * sanitizer + NetworkPolicy (SSRF) before navigation.
+ */
+export async function runFollowLink(href: string, sessionId: string = DEFAULT_SESSION) {
+  if (!sanitizer.validateURL(href)) {
+    throw new Error("Invalid URL");
+  }
+  // HIGH-3: apply the same NetworkPolicy the gateway facade uses, so the
+  // follow_link path is protected against private/loopback (SSRF) too.
+  const verdict = new NetworkPolicy().assess(href);
+  if (!verdict.ok) {
+    throw new Error(`navigation denied: ${verdict.reason}`);
+  }
+  const { page } = await ensureBrowser(sessionId);
+  await retry.executeWithRetry(async () => {
+    await page.goto(href, { waitUntil: "load", timeout: 30000 });
+  });
+  return {
+    success: true,
+    url: page.url(),
+    title: await page.title(),
+  };
+}
+
 export async function runFill(
   selector: string,
   value: string,
@@ -258,7 +286,7 @@ export const playwrightTools = [
 
   {
     name: "playwright_click",
-    description: "Click an element",
+    description: "Click an element. Routed through the gateway safety/approval gate: a raw click is approval-required unless a one-time approval token is supplied (HIGH-D/BLOCKER-E).",
     inputSchema: {
       type: "object",
       properties: {
@@ -267,11 +295,40 @@ export const playwrightTools = [
           description: "CSS selector of element to click",
         },
         timeout: { type: "number", description: "Timeout in milliseconds" },
+        approval: {
+          type: "object",
+          description: "Optional one-time approval token { approvalId, signature } for a side-effect/raw click",
+        },
       },
       required: ["selector"],
     },
-    execute(args: any) {
-      return runClick(args.selector, args.timeout);
+    async execute(args: any) {
+      // Route through the gateway so the safety/approval gate applies. A raw
+      // click is ALWAYS approval-required (HIGH-D); the caller must supply a
+      // one-time token issued by the operator CLI (BLOCKER-E). This closes the
+      // bypass where a legacy MCP caller could click any side-effect control
+      // without approval.
+      const gateway = createGateway();
+      const result = await gateway.executeTask({
+        taskId: `legacy-click-${Date.now()}`,
+        sessionId: "default",
+        action: { type: "click", target: args.selector },
+        approval: args.approval
+          ? { approved: true, approvalId: args.approval.approvalId, signature: args.approval.signature }
+          : undefined,
+      });
+      if (result.status === "blocked") {
+        return {
+          success: false,
+          category: result.category,
+          reason: result.reason,
+          pendingId: (result as any).pendingId,
+        };
+      }
+      if (result.status !== "success") {
+        return { success: false, reason: result.reason };
+      }
+      return { success: true, selector: args.selector };
     },
   },
 

@@ -3,6 +3,7 @@ import type { BrowserTask } from '../../../domain/browser-task.js';
 import type { BrowserEngineId, BrowserEngineResult, BrowserFailureCategory } from '../../../domain/browser-result.js';
 import {
   runNavigate,
+  runFollowLink,
   runSnapshot,
   runClick,
   runFill,
@@ -64,6 +65,7 @@ export class PlaywrightEngine implements BrowserEngine {
   async supports(task: BrowserTask): Promise<boolean> {
     return [
       'navigate',
+      'follow_link',
       'snapshot',
       'click',
       'fill',
@@ -85,6 +87,9 @@ export class PlaywrightEngine implements BrowserEngine {
       switch (task.action.type) {
         case 'navigate':
           data = await runNavigate(task.action.url, 'load', sessionId);
+          break;
+        case 'follow_link':
+          data = await runFollowLink(task.action.href, sessionId);
           break;
         case 'snapshot':
           data = await runSnapshot(sessionId);

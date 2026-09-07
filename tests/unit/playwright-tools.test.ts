@@ -13,12 +13,15 @@ describe('Playwright Tools', () => {
       expect(tool?.inputSchema.properties.waitUntil).toBeDefined();
     });
 
-    it('should have playwright_click tool', () => {
+    it('should have playwright_click tool (gated through the gateway safety/approval gate)', () => {
       const tool = playwrightTools.find((t) => t.name === 'playwright_click');
 
       expect(tool).toBeDefined();
-      expect(tool?.description).toBe('Click an element');
+      // HIGH-D/BLOCKER-E: the legacy click is now routed through the gateway so
+      // a raw click is approval-required unless a one-time token is supplied.
+      expect(tool?.description).toContain('approval');
       expect(tool?.inputSchema.required).toContain('selector');
+      expect(tool?.inputSchema.properties.approval).toBeDefined();
     });
 
     it('should have playwright_fill tool', () => {
@@ -103,6 +106,33 @@ describe('Playwright Tools', () => {
       });
 
       expect(playwrightTools.length).toBe(7);
+    });
+  });
+
+  describe('HIGH-D/BLOCKER-E: legacy playwright_click is gated through the gateway', () => {
+    it('a raw click on a side-effect selector is approval-required (no browser needed — gate blocks first)', async () => {
+      const tool = playwrightTools.find((t) => t.name === 'playwright_click');
+      expect(tool).toBeDefined();
+      if (!tool) return;
+
+      // The gateway safety gate blocks a raw click BEFORE any engine runs, so
+      // this does not require a browser. A hostile page can put a[href] /
+      // role=tab on a destructive control; the raw click must NOT auto-execute.
+      const result = await tool.execute({ selector: '#delete-account' });
+      expect(result.success).toBe(false);
+      expect(result.category).toBe('approval_required');
+      expect(result.pendingId).toBeTruthy(); // operator can approve it
+    });
+
+    it('a raw click on a previously-safe-looking selector (a[href]) is also approval-required', async () => {
+      const tool = playwrightTools.find((t) => t.name === 'playwright_click');
+      expect(tool).toBeDefined();
+      if (!tool) return;
+
+      // HIGH-D: even a[href] / [role="tab"] must not auto-allow a raw click.
+      const result = await tool.execute({ selector: 'a[href="/about"]' });
+      expect(result.success).toBe(false);
+      expect(result.category).toBe('approval_required');
     });
   });
 });
