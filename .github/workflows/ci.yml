@@ -45,11 +45,17 @@ jobs:
       - name: Run unit tests (real gate)
         run: npm run test:unit
 
+      # Browser-gateway integration tests (real gate). The legacy
+      # `agent-flow.test.ts` is excluded: it requires an external Qwen endpoint
+      # and is a documented pre-existing known failure unrelated to the gateway.
+      - name: Run browser-gateway integration tests (real gate)
+        run: npx vitest run tests/integration/browser-gateway
+
       - name: Check for TypeScript errors
         run: npx tsc --noEmit
 
   lint:
-    name: Lint
+    name: Lint (informational)
     runs-on: ubuntu-latest
 
     steps:
@@ -65,12 +71,15 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
-      - name: Run ESLint
-        run: npx eslint . --ext .ts,.js || echo "ESLint not configured"
-        continue-on-error: true
+      # Lint is explicitly INFORMATIONAL (not a gate): the repo has no ESLint
+      # config, so `eslint` would fail on "no config found". We report it
+      # without failing the build. TypeScript typecheck (in the test job) is the
+      # real static-analysis gate.
+      - name: Run ESLint (informational)
+        run: npx eslint . --ext .ts,.js || echo "ESLint: no config / informational only (not a gate)"
 
   security:
-    name: Security Audit
+    name: Security Audit (real gate)
     runs-on: ubuntu-latest
 
     steps:
@@ -83,9 +92,19 @@ jobs:
           node-version: '20.x'
           cache: 'npm'
 
-      - name: Run npm audit
-        run: npm audit --audit-level=moderate || true
-        continue-on-error: true
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      # REAL GATE: fail on any high/critical vulnerability in RUNTIME deps.
+      # No `|| true`, no `continue-on-error`. The Browser Gateway/MCP must not
+      # release with open high/critical runtime findings.
+      - name: Audit runtime dependencies (gate)
+        run: npm audit --omit=dev --audit-level=high
+
+      # Informational: full audit including dev deps (non-failing) so dev-dep
+      # findings are visible without blocking the release.
+      - name: Audit all dependencies (informational)
+        run: npm audit || true
 
       - name: Check for secrets
         run: |

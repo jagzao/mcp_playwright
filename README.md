@@ -21,7 +21,8 @@ A locally runnable **Browser Agent Gateway** for Juan's agent ecosystem. It give
 - **Node.js >= 20** ([nodejs.org](https://nodejs.org/))
 - **Playwright chromium browser** — `npx playwright install chromium`
 - **Obscura** (optional) — set `OBSCURA_MCP_COMMAND` to enable the primary engine. Without it, the gateway uses the Playwright fallback (still fully usable).
-- **MASTER_KEY** — a 32+ character random string. Required for durable encrypted sessions (`SessionVault`).
+- **MASTER_KEY** — a 32+ character random string. Required for durable encrypted sessions (`SessionVault`). Also used to derive the approval-registry subkey when `APPROVAL_SECRET` is not set.
+- **APPROVAL_SECRET** (recommended) — a random string used to sign approval tokens. If not set, the approval registry derives a dedicated subkey from `MASTER_KEY` (HKDF). **There is no default secret**: without `APPROVAL_SECRET` or a valid `MASTER_KEY` (32+ chars), the approval registry is fail-closed and side-effect approvals cannot be issued or verified.
 - **LLM provider API keys** (optional) — `DEEPSEEK_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY` for browser-operator LLM routing.
 - **Search provider API keys** (optional) — `SEARCH_BRAVE_API_KEY`, `SEARCH_EXA_API_KEY`, `SEARCH_TAVILY_API_KEY` for Deep Research. Offline smoke uses a fake provider, so no key is required to try research.
 
@@ -36,6 +37,7 @@ npm install
 # 2. Configure environment
 cp .env.example .env
 #   - Set MASTER_KEY to a 32+ char random string
+#   - Optionally set APPROVAL_SECRET (a random string) to sign approval tokens
 #   - Optionally set OBSCURA_MCP_COMMAND and provider API keys
 
 # 3. Install the Playwright chromium browser
@@ -224,7 +226,9 @@ approval_required -> pending approval -> trusted human/operator approval
    ```
    The action executes **exactly once**. The same token cannot approve a different target/task/session, and cannot be replayed.
 
-> **Security:** the `approve` step is only reachable through the local operator CLI (`gateway:approve`). The MCP `gateway_execute` surface only *verifies* tokens — an untrusted MCP caller can never self-approve.
+> **Security:** the `approve` step is only reachable through the local operator CLI (`gateway:approve`). The MCP `gateway_execute` surface only *verifies* tokens — an untrusted MCP caller can never self-approve. A pending request that was **not** approved by the operator can never verify, even if the caller computes/injects a valid HMAC signature.
+
+> **Secret requirement:** approval tokens are HMAC-signed with `APPROVAL_SECRET` (or a subkey HKDF-derived from `MASTER_KEY`). There is **no default secret** — if neither is configured, the approval registry is fail-closed and approvals cannot be issued or verified. Run `npm run diagnose` to confirm readiness.
 
 ### Safe navigation: use `follow_link`, not raw `click`
 

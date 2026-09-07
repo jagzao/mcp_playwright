@@ -1,4 +1,4 @@
-import { randomBytes, createHmac, timingSafeEqual } from 'crypto';
+import { randomBytes, createHmac, timingSafeEqual, hkdfSync } from 'crypto';
 
 /**
  * Approval registry (AC19 / AC16 / BLOCKER-E).
@@ -93,17 +93,65 @@ export interface ApprovalRegistry {
 
 export const DEFAULT_APPROVAL_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
+/** Minimum length for a usable MASTER_KEY (>=32 chars). */
+export const MIN_MASTER_KEY_LENGTH = 32;
+
+/** Fixed HKDF info/salt for deriving the approval subkey from MASTER_KEY. */
+const APPROVAL_HKDF_INFO = 'browser-gateway-approval';
+const APPROVAL_HKDF_SALT = 'browser-gateway-approval-salt-v1';
+
+/**
+ * Derive a stable, non-static approval subkey from a MASTER_KEY via HKDF-SHA256.
+ * The same MASTER_KEY always yields the same subkey (so two processes sharing a
+ * MASTER_KEY can cross-verify), but the subkey is NOT a hardcoded default and is
+ * distinct from the master key itself (key separation).
+ */
+export function deriveApprovalSecret(masterKey: string): string {
+  const derived = hkdfSync('sha256', Buffer.from(masterKey, 'utf-8'), APPROVAL_HKDF_SALT, APPROVAL_HKDF_INFO, 32);
+  return Buffer.from(derived).toString('hex');
+}
+
 export class HmacApprovalRegistry implements ApprovalRegistry {
-  private readonly secret: string;
+  private readonly secret: string | undefined;
   private readonly pendings = new Map<string, PendingApproval>();
   private readonly used = new Set<string>();
   private readonly revoked = new Set<string>();
 
+  /**
+   * BLOCKER-F: there is NO static default secret. The registry is only usable
+   * when an explicit `secret` is passed OR a valid MASTER_KEY (>=32 chars) is
+   * available to derive a dedicated subkey from. Otherwise the registry is
+   * fail-closed: `isConfigured()` is false and every signing/verification
+   * operation throws or fails rather than silently using a known default.
+   */
   constructor(secret?: string) {
-    this.secret = secret ?? process.env.APPROVAL_SECRET ?? 'dev-approval-secret';
+    if (secret !== undefined && secret !== null && secret !== '') {
+      this.secret = secret;
+      return;
+    }
+    const masterKey = process.env.MASTER_KEY;
+    if (masterKey && masterKey.length >= MIN_MASTER_KEY_LENGTH) {
+      this.secret = deriveApprovalSecret(masterKey);
+      return;
+    }
+    this.secret = undefined;
+  }
+
+  /** True when a usable secret is configured (explicit or derived from MASTER_KEY). */
+  isConfigured(): boolean {
+    return this.secret !== undefined;
+  }
+
+  private assertConfigured(): void {
+    if (this.secret === undefined) {
+      throw new Error(
+        'Approval registry is not configured: set APPROVAL_SECRET or a MASTER_KEY of 32+ chars. Refusing to use a known default secret.',
+      );
+    }
   }
 
   createPending(request: ApprovalRequest, ttlMs: number = DEFAULT_APPROVAL_TTL_MS): PendingApproval {
+    this.assertConfigured();
     const pendingId = randomBytes(16).toString('hex');
     const now = Date.now();
     const pending: PendingApproval = {
@@ -133,6 +181,7 @@ export class HmacApprovalRegistry implements ApprovalRegistry {
   }
 
   approve(pendingId: string, approver: string): ApproveResult {
+    this.assertConfigured();
     const pending = this.pendings.get(pendingId);
     if (!pending) return { ok: false, reason: `unknown pending approval: ${pendingId}` };
     if (pending.status !== 'pending') {
@@ -157,12 +206,19 @@ export class HmacApprovalRegistry implements ApprovalRegistry {
   }
 
   verify(token: ApprovalToken, request: ApprovalRequest): boolean {
+    if (!this.isConfigured()) return false; // fail-closed: no secret -> never verify
     if (!token || !token.approvalId || !token.signature) return false;
     if (this.revoked.has(token.approvalId)) return false;
     if (this.used.has(token.approvalId)) return false; // one-time / replay protection
     const pending = this.pendings.get(token.approvalId);
     if (!pending) return false;
     if (pending.status === 'revoked') return false;
+    // BLOCKER-F: a pending that was NOT approved by the operator must NEVER
+    // verify, even if the caller computes/injects a valid HMAC signature. The
+    // `status === 'approved'` gate is what blocks self-approval, not just the
+    // signature. A still-`pending` record (or any non-approved status) is
+    // rejected regardless of signature validity.
+    if (pending.status !== 'approved') return false;
     if (Date.now() > pending.expiresAt) {
       pending.status = 'expired';
       return false;
@@ -183,6 +239,13 @@ export class HmacApprovalRegistry implements ApprovalRegistry {
   }
 
   // --- Persistence support (used by FileApprovalRegistry) -------------------
+
+  /** Clear all in-memory state (used by FileApprovalRegistry.reload). */
+  clear(): void {
+    this.pendings.clear();
+    this.used.clear();
+    this.revoked.clear();
+  }
 
   /** Re-insert a pending record preserving its identity/token (for file rehydration). */
   rehydrate(p: PendingApproval): void {
@@ -206,6 +269,12 @@ export class HmacApprovalRegistry implements ApprovalRegistry {
   }
 
   private sign(approvalId: string, request: ApprovalRequest): string {
+    const secret = this.secret;
+    if (secret === undefined) {
+      throw new Error(
+        'Approval registry is not configured: set APPROVAL_SECRET or a MASTER_KEY of 32+ chars. Refusing to use a known default secret.',
+      );
+    }
     const payload = [
       approvalId,
       request.taskId,
@@ -213,7 +282,7 @@ export class HmacApprovalRegistry implements ApprovalRegistry {
       request.actionType,
       request.target ?? '',
     ].join('|');
-    return createHmac('sha256', this.secret).update(payload).digest('hex');
+    return createHmac('sha256', secret).update(payload).digest('hex');
   }
 }
 

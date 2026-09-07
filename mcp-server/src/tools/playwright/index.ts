@@ -295,6 +295,10 @@ export const playwrightTools = [
           description: "CSS selector of element to click",
         },
         timeout: { type: "number", description: "Timeout in milliseconds" },
+        taskId: {
+          type: "string",
+          description: "Optional stable taskId to reuse across the approval round-trip. If omitted, one is generated and returned in the blocked result so the caller can reuse it on retry (BLOCKER-G).",
+        },
         approval: {
           type: "object",
           description: "Optional one-time approval token { approvalId, signature } for a side-effect/raw click",
@@ -308,9 +312,20 @@ export const playwrightTools = [
       // one-time token issued by the operator CLI (BLOCKER-E). This closes the
       // bypass where a legacy MCP caller could click any side-effect control
       // without approval.
-      const gateway = createGateway();
+      //
+      // BLOCKER-G: the taskId must be STABLE across the approval round-trip.
+      // If the caller supplies a `taskId`, reuse it (so the token issued for the
+      // first blocked call verifies on retry). Otherwise generate one and return
+      // it in the blocked result so the caller can reuse it on retry.
+      const gateway = args.gateway ?? createGateway();
+      // BLOCKER-G: the taskId must be STABLE across the approval round-trip.
+      // If the caller supplies a `taskId`, reuse it (so the token issued for the
+      // first blocked call verifies on retry). Otherwise generate a unique one
+      // (timestamp + random suffix so two calls in the same millisecond differ)
+      // and return it in the blocked result so the caller can reuse it on retry.
+      const taskId = args.taskId ?? `legacy-click-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const result = await gateway.executeTask({
-        taskId: `legacy-click-${Date.now()}`,
+        taskId,
         sessionId: "default",
         action: { type: "click", target: args.selector },
         approval: args.approval
@@ -323,6 +338,7 @@ export const playwrightTools = [
           category: result.category,
           reason: result.reason,
           pendingId: (result as any).pendingId,
+          taskId,
         };
       }
       if (result.status !== "success") {

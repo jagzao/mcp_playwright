@@ -6,7 +6,7 @@ import type {
 } from '../domain/browser-result.js';
 import type { GatewaySession, GatewaySessionStatus } from '../domain/browser-session.js';
 import { BrowserEngineRouter } from './browser-engine-router.js';
-import { SafetyGate } from './safety-gate.js';
+import { SafetyGate, actionTarget } from './safety-gate.js';
 import { NetworkPolicy } from './network-policy.js';
 import { HmacApprovalRegistry, type ApprovalRegistry } from './approval-registry.js';
 import { LlmOperatorRouter, type LlmRoutingSelection } from './llm-operator-router.js';
@@ -129,12 +129,9 @@ export class BrowserGateway {
           taskId: task.taskId,
           sessionId: task.sessionId,
           actionType: task.action.type,
-          target:
-            task.action.type === 'click'
-              ? task.action.target
-              : task.action.type === 'follow_link'
-                ? task.action.href
-                : undefined,
+          // Bind the pending to the exact reviewed target (click/follow_link and
+          // the explicit side-effect types submit/send/publish).
+          target: actionTarget(task.action),
         });
         pendingId = pending.pendingId;
       }

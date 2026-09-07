@@ -16,15 +16,12 @@ export type BrowserAction =
       type: 'click';
       target: string;
       /**
-       * Side-effect classification for a click. A real `click` can submit a
-       * form, publish, buy, or run an irreversible admin action. Defaults to
-       * `read` (a plain/navigation click is auto-allowed). Set to `'side_effect'`
-       * (or `sideEffect: true`) when the click has an irreversible external
-       * effect, in which case it requires the same approval as submit/send/
-       * publish. This binds the side-effect semantics to the actually-
-       * executable action (the engine runs `click`), closing the bypass where
-       * the real web action went through `click` while the protected types
-       * never reached the engine.
+       * Side-effect classification for a click. HIGH-D: a raw `click` is ALWAYS
+       * approval-required regardless of this flag — the target/selector string
+       * is caller/page-controlled and cannot be trusted to auto-authorize a side
+       * effect. This flag is retained only for informational/audit purposes; it
+       * can never downgrade a click to auto-allow. For safe, reversible
+       * navigation use the dedicated `follow_link` action instead.
        */
       sideEffect?: boolean | 'read' | 'side_effect';
     }

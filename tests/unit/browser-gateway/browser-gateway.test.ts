@@ -201,7 +201,7 @@ describe('BrowserGateway facade (US-001)', () => {
     expect(primary.executeCalls).toBe(0);
 
     // Only a registry-issued token authorizes execution.
-    const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'submit' });
+    const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'submit', target: '#form' });
     const approved = await gateway.executeTask(
       task({ action: { type: 'submit', target: '#form' }, approval: { approved: true, approvalId: token.approvalId, signature: token.signature } }),
     );

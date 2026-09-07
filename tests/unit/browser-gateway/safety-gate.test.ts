@@ -35,7 +35,7 @@ describe('SafetyGate (US-001)', () => {
   it('a registry-issued approval token allows execution (AC19)', () => {
     const registry = new HmacApprovalRegistry('test-secret');
     const gate = new SafetyGate(true, registry);
-    const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'submit' });
+    const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'submit', target: '#form' });
     const verdict = gate.assess(
       task({ type: 'submit', target: '#form' }, { approved: true, approvalId: token.approvalId, signature: token.signature }),
     );
@@ -283,6 +283,58 @@ describe('SafetyGate (US-001)', () => {
 
     it('follow_link is in READ_ONLY_ACTION_TYPES', () => {
       expect(READ_ONLY_ACTION_TYPES.has('follow_link')).toBe(true);
+    });
+  });
+
+  describe('MEDIUM: target binding generalized to submit/send/publish', () => {
+    it('a submit token is bound to its target (a token for a different target is rejected)', () => {
+      const registry = new HmacApprovalRegistry('test-secret');
+      const gate = new SafetyGate(true, registry);
+      const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'submit', target: '#form-a' });
+      // Exact target approves.
+      expect(
+        gate.assess(
+          task({ type: 'submit', target: '#form-a' }, { approved: true, approvalId: token.approvalId, signature: token.signature }),
+        ).status,
+      ).toBe('allowed');
+      // A different target is rejected.
+      expect(
+        gate.assess(
+          task({ type: 'submit', target: '#form-b' }, { approved: true, approvalId: token.approvalId, signature: token.signature }),
+        ).status,
+      ).toBe('approval_required');
+    });
+
+    it('a send token is bound to its target', () => {
+      const registry = new HmacApprovalRegistry('test-secret');
+      const gate = new SafetyGate(true, registry);
+      const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'send', target: '#msg' });
+      expect(
+        gate.assess(
+          task({ type: 'send', target: '#msg' }, { approved: true, approvalId: token.approvalId, signature: token.signature }),
+        ).status,
+      ).toBe('allowed');
+      expect(
+        gate.assess(
+          task({ type: 'send', target: '#other' }, { approved: true, approvalId: token.approvalId, signature: token.signature }),
+        ).status,
+      ).toBe('approval_required');
+    });
+
+    it('a publish token is bound to its target', () => {
+      const registry = new HmacApprovalRegistry('test-secret');
+      const gate = new SafetyGate(true, registry);
+      const token = registry.issue({ taskId: 't-1', sessionId: 's-1', actionType: 'publish', target: '#post' });
+      expect(
+        gate.assess(
+          task({ type: 'publish', target: '#post' }, { approved: true, approvalId: token.approvalId, signature: token.signature }),
+        ).status,
+      ).toBe('allowed');
+      expect(
+        gate.assess(
+          task({ type: 'publish', target: '#other' }, { approved: true, approvalId: token.approvalId, signature: token.signature }),
+        ).status,
+      ).toBe('approval_required');
     });
   });
 });

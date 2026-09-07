@@ -120,6 +120,20 @@ checks.push({
   optional: true,
 });
 
+// Approval registry secret (BLOCKER-F): the approval HMAC must never fall back
+// to a known default. Either APPROVAL_SECRET or a valid MASTER_KEY (32+ chars,
+// from which a dedicated subkey is HKDF-derived) must be configured.
+checks.push({
+  name: 'Approval secret configured (APPROVAL_SECRET or MASTER_KEY 32+)',
+  check: () => {
+    const approvalSecret = process.env.APPROVAL_SECRET;
+    if (approvalSecret && approvalSecret.trim().length > 0) return true;
+    const masterKey = process.env.MASTER_KEY;
+    return Boolean(masterKey && masterKey.length >= 32 && !masterKey.includes('your-32-character'));
+  },
+  fix: 'Set APPROVAL_SECRET (a random string) OR a MASTER_KEY of 32+ random characters in .env. Without one, the approval registry is fail-closed and side-effect approvals cannot be issued/verified.',
+});
+
 // --- LLM provider readiness (availability only, never the key) ----------------
 
 const envOps = createEnvOperators();

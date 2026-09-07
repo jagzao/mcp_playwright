@@ -196,3 +196,84 @@ describe('Approval flow end-to-end (BLOCKER-E, integration)', () => {
     expect(primary.executeCalls).toBe(0);
   }, 30000);
 });
+
+/**
+ * BLOCKER-G: the approved legacy `playwright_click` path must reach the REAL
+ * Playwright engine's `runClick`, not just a fake. This test proves the full
+ * round-trip (blocked -> operator approve -> retry with same taskId + token ->
+ * runClick executes) through the actual `PlaywrightEngine`, asserting that the
+ * engine routes an approved `click` to `runClick` with the exact target.
+ *
+ * `runClick` is mocked so the test is deterministic and CI-safe (no real
+ * browser / network dependency), while still proving the engine routing.
+ */
+describe('BLOCKER-G: approved legacy click reaches the real Playwright engine runClick (integration)', () => {
+  it('approved click routes through PlaywrightEngine to runClick with the exact target', async () => {
+    const { PlaywrightEngine } = await import(
+      '../../../lib/browser-gateway/infrastructure/engines/playwright/playwright-engine.js'
+    );
+    const { HmacApprovalRegistry } = await import(
+      '../../../lib/browser-gateway/application/approval-registry.js'
+    );
+    const { BrowserGateway } = await import(
+      '../../../lib/browser-gateway/application/browser-gateway.js'
+    );
+    const { LlmOperatorRouter } = await import(
+      '../../../lib/browser-gateway/application/llm-operator-router.js'
+    );
+    const { vi } = await import('vitest');
+
+    // Mock runClick so the engine routes to it without a real browser.
+    const playwrightTools = await import('../../../mcp-server/src/tools/playwright/index.js');
+    const runClickSpy = vi
+      .spyOn(playwrightTools, 'runClick')
+      .mockResolvedValue({ success: true, selector: 'a[href="/about"]' } as never);
+
+    const registry = new HmacApprovalRegistry('test-secret');
+    const engine = new PlaywrightEngine();
+    const gateway = new BrowserGateway({
+      primaryEngine: engine,
+      fallbackEngine: engine,
+      llmRouter: new LlmOperatorRouter({
+        primary: { provider: 'deepseek', model: 'deepseek-v4-flash', available: () => true },
+        escalation: { provider: 'gemini', model: 'gemini-3.8-flash', available: () => true },
+        alternate: { provider: 'openai', model: 'gpt-5.6-luna', available: () => true },
+      }),
+      approvalRegistry: registry,
+    });
+
+    const taskId = 'legacy-click-real-engine';
+    const target = 'a[href="/about"]';
+    try {
+      // 1) A raw click is blocked; a pending is created.
+      const blocked = await gateway.executeTask({
+        taskId,
+        sessionId: 'default',
+        action: { type: 'click', target },
+      });
+      expect(blocked.status).toBe('blocked');
+      if (blocked.status !== 'blocked') return;
+      const pendingId = blocked.pendingId!;
+      expect(pendingId).toBeTruthy();
+
+      // 2) Operator approves the pending -> one-time token.
+      const approved = registry.approve(pendingId, 'operator');
+      expect(approved.ok).toBe(true);
+      if (!approved.ok) return;
+
+      // 3) Retry with the SAME taskId + token -> the real PlaywrightEngine
+      //    routes the approved click to runClick with the exact target.
+      const executed = await gateway.executeTask({
+        taskId,
+        sessionId: 'default',
+        action: { type: 'click', target },
+        approval: { approved: true, approvalId: approved.token.approvalId, signature: approved.token.signature },
+      });
+      expect(executed.status).toBe('success');
+      expect(runClickSpy).toHaveBeenCalledWith(target, 30000, 'default');
+    } finally {
+      runClickSpy.mockRestore();
+      await gateway.closeSession('default').catch(() => undefined);
+    }
+  }, 30000);
+});

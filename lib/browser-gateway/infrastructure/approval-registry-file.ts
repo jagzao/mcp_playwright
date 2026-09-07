@@ -58,20 +58,28 @@ export class FileApprovalRegistry implements ApprovalRegistry {
   }
 
   getPending(pendingId: string): PendingApproval | undefined {
+    this.reload();
     return this.inner.getPending(pendingId);
   }
 
   listPending(): PendingApproval[] {
+    this.reload();
     return this.inner.listPending();
   }
 
   approve(pendingId: string, approver: string): ApproveResult {
+    this.reload();
     const result = this.inner.approve(pendingId, approver);
     this.persist();
     return result;
   }
 
   verify(token: ApprovalToken, request: ApprovalRequest): boolean {
+    // Reload from disk first so a cross-process approval (operator CLI) is
+    // visible to this process. BLOCKER-F requires `status === 'approved'`, so
+    // a stale in-memory copy that still says `pending` would wrongly reject a
+    // token the operator already approved in another process.
+    this.reload();
     const ok = this.inner.verify(token, request);
     if (ok) this.persist();
     return ok;
@@ -83,6 +91,18 @@ export class FileApprovalRegistry implements ApprovalRegistry {
   }
 
   // --- Persistence -----------------------------------------------------------
+
+  /**
+   * Reload the in-memory state from disk. Used before verify/approve/getPending
+   * so a cross-process approval (operator CLI) is visible to this process.
+   * BLOCKER-F requires `status === 'approved'`, so a stale in-memory copy that
+   * still says `pending` would wrongly reject a token the operator already
+   * approved in another process.
+   */
+  private reload(): void {
+    this.inner.clear();
+    this.load();
+  }
 
   private load(): void {
     if (!existsSync(this.filePath)) return;

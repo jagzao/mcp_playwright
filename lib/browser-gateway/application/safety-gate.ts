@@ -38,6 +38,29 @@ export type SafetyVerdict =
   | { status: 'approval_required'; reason: string };
 
 /**
+ * Return the target an action is bound to for approval purposes, or undefined
+ * if the action has no target. Used to bind an approval token to the EXACT
+ * reviewed target so approving one target does not authorize another.
+ *
+ * Covers all targeted actions: click (selector), follow_link (href), and the
+ * explicit side-effect types submit/send/publish (their optional target).
+ */
+export function actionTarget(action: BrowserAction): string | undefined {
+  switch (action.type) {
+    case 'click':
+      return action.target;
+    case 'follow_link':
+      return action.href;
+    case 'submit':
+    case 'send':
+    case 'publish':
+      return action.target;
+    default:
+      return undefined;
+  }
+}
+
+/**
  * True when the action has an irreversible external side effect.
  *
  * A `click` is normally read-only/reversible, but a real click can submit a
@@ -112,15 +135,10 @@ export class SafetyGate {
           taskId: task.taskId,
           sessionId: task.sessionId,
           actionType: task.action.type,
-          // Bind the token to the exact reviewed target when the action targets
-          // a specific selector, so approving `#btn-482` does NOT authorize a
-          // click on `#delete-account`.
-          target:
-            task.action.type === 'click'
-              ? task.action.target
-              : task.action.type === 'follow_link'
-                ? task.action.href
-                : undefined,
+          // Bind the token to the exact reviewed target so approving one target
+          // does NOT authorize a different one. Covers click/follow_link and the
+          // explicit side-effect types submit/send/publish.
+          target: actionTarget(task.action),
         },
       );
       if (ok) {

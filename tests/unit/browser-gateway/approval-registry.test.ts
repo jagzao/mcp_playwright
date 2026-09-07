@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { HmacApprovalRegistry } from '../../../lib/browser-gateway/application/approval-registry.js';
+import { createHmac } from 'crypto';
+import {
+  HmacApprovalRegistry,
+  deriveApprovalSecret,
+  MIN_MASTER_KEY_LENGTH,
+} from '../../../lib/browser-gateway/application/approval-registry.js';
 
 describe('HmacApprovalRegistry (AC19 / BLOCKER-2)', () => {
   it('issues an opaque token that verifies for the exact task/action', () => {
@@ -167,5 +172,127 @@ describe('HmacApprovalRegistry (BLOCKER-E: pending -> approve -> one-time token)
     if (!result.ok) return;
     // The token verifies for the exact request, authorizing execution.
     expect(registry.verify(result.token, request)).toBe(true);
+  });
+});
+
+describe('HmacApprovalRegistry (BLOCKER-F: no default secret, fail-closed, approved-only verify)', () => {
+  const request = { taskId: 't-1', sessionId: 's-1', actionType: 'click', target: '#delete-account' };
+
+  it('a pending NOT approved can never verify, even with a computable/injected valid HMAC signature', () => {
+    // Adversarial: the caller knows the secret (or can compute the HMAC) and
+    // injects a perfectly valid signature for the pending record. The
+    // `status === 'approved'` gate must still block it — the pending was never
+    // approved by the operator.
+    const registry = new HmacApprovalRegistry('test-secret');
+    const pending = registry.createPending(request);
+    expect(pending.status).toBe('pending');
+
+    // Compute the exact signature the registry WOULD produce if it approved.
+    const payload = [
+      pending.pendingId,
+      request.taskId,
+      request.sessionId,
+      request.actionType,
+      request.target ?? '',
+    ].join('|');
+    const forgedSignature = createHmac('sha256', 'test-secret').update(payload).digest('hex');
+
+    // Even with a valid signature, a non-approved pending must NOT verify.
+    expect(
+      registry.verify({ approvalId: pending.pendingId, signature: forgedSignature }, request),
+    ).toBe(false);
+
+    // Sanity: the SAME signature DOES verify once the operator approves it,
+    // proving the gate is the `approved` status, not the signature.
+    const approved = registry.approve(pending.pendingId, 'operator');
+    expect(approved.ok).toBe(true);
+    if (!approved.ok) return;
+    expect(approved.token.signature).toBe(forgedSignature);
+    expect(registry.verify(approved.token, request)).toBe(true);
+  });
+
+  it('registry without a secret and without MASTER_KEY is fail-closed', () => {
+    const prev = process.env.MASTER_KEY;
+    const prevApproval = process.env.APPROVAL_SECRET;
+    delete process.env.MASTER_KEY;
+    delete process.env.APPROVAL_SECRET;
+    try {
+      const registry = new HmacApprovalRegistry();
+      expect(registry.isConfigured()).toBe(false);
+      // createPending / approve / issue throw (fail-closed).
+      expect(() => registry.createPending(request)).toThrow();
+      expect(() => registry.issue(request)).toThrow();
+      // verify returns false (fail-closed), never a known-default success.
+      expect(registry.verify({ approvalId: 'x', signature: 'y' }, request)).toBe(false);
+    } finally {
+      if (prev !== undefined) process.env.MASTER_KEY = prev;
+      else delete process.env.MASTER_KEY;
+      if (prevApproval !== undefined) process.env.APPROVAL_SECRET = prevApproval;
+      else delete process.env.APPROVAL_SECRET;
+    }
+  });
+
+  it('an explicit empty-string secret is treated as unconfigured (fail-closed)', () => {
+    const prev = process.env.MASTER_KEY;
+    const prevApproval = process.env.APPROVAL_SECRET;
+    delete process.env.MASTER_KEY;
+    delete process.env.APPROVAL_SECRET;
+    try {
+      const registry = new HmacApprovalRegistry('');
+      expect(registry.isConfigured()).toBe(false);
+      expect(() => registry.createPending(request)).toThrow();
+    } finally {
+      if (prev !== undefined) process.env.MASTER_KEY = prev;
+      else delete process.env.MASTER_KEY;
+      if (prevApproval !== undefined) process.env.APPROVAL_SECRET = prevApproval;
+      else delete process.env.APPROVAL_SECRET;
+    }
+  });
+
+  it('HKDF derivation from MASTER_KEY produces a working secret; same MASTER_KEY cross-verifies, different do not', () => {
+    const masterA = 'a'.repeat(MIN_MASTER_KEY_LENGTH);
+    const masterB = 'b'.repeat(MIN_MASTER_KEY_LENGTH);
+
+    // Same MASTER_KEY -> same derived subkey -> cross-verify.
+    const a1 = new HmacApprovalRegistry(masterA);
+    const a2 = new HmacApprovalRegistry(masterA);
+    expect(a1.isConfigured()).toBe(true);
+    expect(a2.isConfigured()).toBe(true);
+    const pending = a1.createPending(request);
+    const approved = a1.approve(pending.pendingId, 'operator');
+    expect(approved.ok).toBe(true);
+    if (!approved.ok) return;
+    const token = approved.token;
+    // Rehydrate the pending into a2 (as the file-backed registry does across
+    // processes) so a2 can look it up, then verify with the SAME derived secret.
+    a2.rehydrate(a1.getPending(pending.pendingId)!);
+    expect(a2.verify(token, request)).toBe(true);
+
+    // Different MASTER_KEY -> different subkey -> no cross-verify.
+    const b = new HmacApprovalRegistry(masterB);
+    b.rehydrate(a1.getPending(pending.pendingId)!);
+    expect(b.verify(token, request)).toBe(false);
+
+    // The derived subkey is deterministic and distinct from the master key.
+    expect(deriveApprovalSecret(masterA)).toBe(deriveApprovalSecret(masterA));
+    expect(deriveApprovalSecret(masterA)).not.toBe(masterA);
+    expect(deriveApprovalSecret(masterA)).not.toBe(deriveApprovalSecret(masterB));
+  });
+
+  it('a too-short MASTER_KEY does not configure the registry (fail-closed)', () => {
+    const prev = process.env.MASTER_KEY;
+    const prevApproval = process.env.APPROVAL_SECRET;
+    delete process.env.APPROVAL_SECRET;
+    process.env.MASTER_KEY = 'short';
+    try {
+      const registry = new HmacApprovalRegistry();
+      expect(registry.isConfigured()).toBe(false);
+      expect(() => registry.createPending(request)).toThrow();
+    } finally {
+      if (prev !== undefined) process.env.MASTER_KEY = prev;
+      else delete process.env.MASTER_KEY;
+      if (prevApproval !== undefined) process.env.APPROVAL_SECRET = prevApproval;
+      else delete process.env.APPROVAL_SECRET;
+    }
   });
 });
