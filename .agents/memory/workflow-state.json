@@ -15,13 +15,19 @@
     "external-audit": "pending"
   },
   "evidence": {
-    "commits": "83cf166..5ff1033",
+    "commits": "83cf166..5987906",
     "pr": "https://github.com/jagzao/mcp_playwright/pull/5",
-    "ci": "4/4 green (Test & Build 18.x/20.x, Lint, Security Audit)",
-    "unitTests": 247,
-    "integrationGatewayTests": 8,
+    "ci": "4/4 green (Test & Build 18.x/20.x, Lint informational, Security Audit real gate)",
+    "unitTests": 257,
+    "integrationApprovalFlowTests": 4,
     "smoke": "PASS",
+    "auditGate": "npm audit --omit=dev --audit-level=high exit 0 (7 moderate runtime only)",
+    "mcpSdk": "1.30.0 (clears HIGH DNS-rebinding)",
     "issue4Comment": "https://github.com/jagzao/mcp_playwright/issues/4#issuecomment-5573461654",
-    "knownFailure": "tests/integration/agent-flow.test.ts (legacy AgentOrchestrator Qwen endpoint; pre-existing, unrelated to gateway)"
+    "pr5Comment": "https://github.com/jagzao/mcp_playwright/pull/5#issuecomment-5574068294",
+    "knownFailures": [
+      "tests/integration/agent-flow.test.ts (legacy AgentOrchestrator Qwen endpoint; pre-existing, unrelated to gateway)",
+      "tests/integration/browser-gateway/browser-host.integration.test.ts (needs headed display/X server; pre-existing, excluded from CI gate)"
+    ]
   }
 }
