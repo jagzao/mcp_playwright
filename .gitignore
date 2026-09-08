@@ -23,6 +23,7 @@ data/sessions/
 data/checkpoints/
 data/agent-memory/
 data/approvals/
+data/browser-sessions/
 backups/
 *.enc
 
