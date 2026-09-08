@@ -4,7 +4,7 @@ on:
   push:
     branches: ['**']
   pull_request:
-    branches: [main, master]
+    branches: [main, master, 'claude/mcp-app-planning-01TvvohqK4dNiv3FXokgSL7c']
 
 jobs:
   test:
@@ -28,6 +28,9 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
+      - name: Install Playwright chromium (for integration tests)
+        run: npx playwright install chromium --with-deps
+
       - name: Create required directories
         run: |
           mkdir -p data/sessions data/form-data data/videos data/screenshots
@@ -42,15 +45,24 @@ jobs:
       - name: Run TypeScript compilation
         run: npm run build
 
-      - name: Run tests
-        run: npm test || echo "Tests not configured yet"
-        continue-on-error: true
+      - name: Run unit tests (real gate)
+        run: npm run test:unit
+
+      # Browser-gateway approval-flow integration tests (real gate). This covers
+      # the BLOCKER-E cross-process approval path and the BLOCKER-G real-engine
+      # routing, deterministically (no headed browser / display needed). The
+      # legacy `agent-flow.test.ts` and `browser-host.integration.test.ts` are
+      # excluded: the former needs an external Qwen endpoint, the latter needs a
+      # headed display (X server) — both are documented pre-existing known
+      # failures unrelated to this change.
+      - name: Run approval-flow integration tests (real gate)
+        run: npx vitest run tests/integration/browser-gateway/approval-flow.integration.test.ts
 
       - name: Check for TypeScript errors
         run: npx tsc --noEmit
 
   lint:
-    name: Lint
+    name: Lint (informational)
     runs-on: ubuntu-latest
 
     steps:
@@ -66,12 +78,15 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
-      - name: Run ESLint
-        run: npx eslint . --ext .ts,.js || echo "ESLint not configured"
-        continue-on-error: true
+      # Lint is explicitly INFORMATIONAL (not a gate): the repo has no ESLint
+      # config, so `eslint` would fail on "no config found". We report it
+      # without failing the build. TypeScript typecheck (in the test job) is the
+      # real static-analysis gate.
+      - name: Run ESLint (informational)
+        run: 'npx eslint . --ext .ts,.js || echo "ESLint: no config / informational only (not a gate)"'
 
   security:
-    name: Security Audit
+    name: Security Audit (real gate)
     runs-on: ubuntu-latest
 
     steps:
@@ -84,13 +99,24 @@ jobs:
           node-version: '20.x'
           cache: 'npm'
 
-      - name: Run npm audit
-        run: npm audit --audit-level=moderate || true
-        continue-on-error: true
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      # REAL GATE: fail on any high/critical vulnerability in RUNTIME deps.
+      # No `|| true`, no `continue-on-error`. The Browser Gateway/MCP must not
+      # release with open high/critical runtime findings.
+      - name: Audit runtime dependencies (gate)
+        run: npm audit --omit=dev --audit-level=high
+
+      # Informational: full audit including dev deps (non-failing) so dev-dep
+      # findings are visible without blocking the release.
+      - name: Audit all dependencies (informational)
+        run: npm audit || true
 
       - name: Check for secrets
         run: |
-          if grep -r "MASTER_KEY.*=.*[a-f0-9]\{32,\}" . --exclude-dir=node_modules --exclude-dir=.git --exclude="*.md" --exclude=".env.example"; then
+          # Exclude test fixtures (test-only MASTER_KEY constants) and docs.
+          if grep -r "MASTER_KEY.*=.*[a-f0-9]\{32,\}" . --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=tests --exclude="*.md" --exclude=".env.example"; then
             echo "⚠️  Potential hardcoded secrets found!"
             exit 1
           fi

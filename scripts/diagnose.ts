@@ -3,15 +3,31 @@
 import { execSync } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import chalk from 'chalk';
+import { createSessionVault } from '../lib/browser-gateway/infrastructure/gateway-factory.js';
+import { createEnvOperators } from '../lib/browser-gateway/infrastructure/llm/env-operators.js';
+import { EnvSecretProvider } from '../lib/browser-gateway/infrastructure/secret-provider/env-secret-provider.js';
+import { launchWithFallback } from '../lib/browser-gateway/infrastructure/engines/playwright/launch-with-fallback.js';
+import {
+  isValidMasterKey,
+  resolveApprovalSecret,
+} from '../lib/security/secret-resolver.js';
 
 console.log(chalk.blue('\n🔍 MCP Playwright Automation - System Diagnostic\n'));
 
-const checks: Array<{ name: string; check: () => boolean; fix?: string }> = [];
+interface Check {
+  name: string;
+  check: () => boolean | Promise<boolean>;
+  fix?: string;
+  optional?: boolean;
+}
 
-// Helper to run command and check
+const checks: Check[] = [];
+
+// Helper to run command and check (cross-platform: `where` on Windows, `command -v` on Unix)
 function commandExists(cmd: string): boolean {
   try {
-    execSync(`command -v ${cmd}`, { stdio: 'ignore' });
+    const probe = process.platform === 'win32' ? `where ${cmd}` : `command -v ${cmd}`;
+    execSync(probe, { stdio: 'ignore' });
     return true;
   } catch {
     return false;
@@ -26,6 +42,8 @@ function commandRuns(cmd: string): boolean {
     return false;
   }
 }
+
+// --- Base environment checks -------------------------------------------------
 
 // Node.js version
 checks.push({
@@ -56,78 +74,154 @@ checks.push({
 checks.push({
   name: '.env file exists',
   check: () => existsSync('.env'),
-  fix: 'Run: npm run init',
+  fix: 'Run: npm run init (or copy .env.example to .env)',
 });
 
-// MASTER_KEY in .env
+// --- Browser Agent Gateway readiness -----------------------------------------
+
+// Obscura readiness (REAL engine: launches the obscura-node CDP binary)
 checks.push({
-  name: 'MASTER_KEY configured',
-  check: () => {
-    if (!existsSync('.env')) return false;
-    const env = readFileSync('.env', 'utf8');
-    return env.includes('MASTER_KEY=') && !env.includes('your-32-character');
+  name: 'Obscura engine available',
+  check: async () => {
+    const { ObscuraEngine } = await import(
+      '../lib/browser-gateway/infrastructure/engines/obscura/obscura-engine.js'
+    );
+    const health = await new ObscuraEngine().health().catch(() => ({ healthy: false }));
+    return health.healthy;
   },
-  fix: 'Run: npm run init (or set MASTER_KEY manually in .env)',
+  fix: 'Install the Obscura browser binary: npm install obscura-node (launches automatically on first use). Optional; Playwright fallback applies otherwise.',
+  optional: true,
 });
 
-// Playwright
+// Playwright browser available (bundled chromium OR system Chrome via channel: 'chrome')
 checks.push({
-  name: 'Playwright installed',
-  check: () => commandExists('playwright'),
-  fix: 'Run: npx playwright install',
+  name: 'Playwright browser available',
+  check: async () => {
+    let browser;
+    try {
+      browser = await launchWithFallback({ headless: true });
+      return true;
+    } catch {
+      return false;
+    } finally {
+      if (browser) {
+        await browser.close().catch(() => {});
+      }
+    }
+  },
+  fix: 'Run: npx playwright install chromium (or install Google Chrome to use the system-Chrome fallback)',
 });
 
-// Ollama
+// MASTER_KEY (secret/session infrastructure)
 checks.push({
-  name: 'Ollama installed',
-  check: () => commandExists('ollama'),
-  fix: 'Run: npm run setup',
+  name: 'MASTER_KEY configured (32+ chars)',
+  check: () => isValidMasterKey(process.env.MASTER_KEY),
+  fix: 'Set a MASTER_KEY of 32+ random characters in .env (required for durable encrypted sessions)',
 });
 
-// Ollama running
+// SessionVault availability
 checks.push({
-  name: 'Ollama service running',
-  check: () => commandRuns('ollama list'),
-  fix: 'Run: ollama serve &',
+  name: 'SessionVault available (encrypted sessions)',
+  check: () => Boolean(createSessionVault()),
+  fix: 'Set a valid MASTER_KEY (32+ chars) in .env to enable the SessionVault',
+  optional: true,
 });
 
-// Tesseract
+// Approval registry secret (BLOCKER-F): the approval HMAC must never fall back
+// to a known default. Either APPROVAL_SECRET or a valid MASTER_KEY (32+ chars,
+// from which a dedicated subkey is HKDF-derived) must be configured.
 checks.push({
-  name: 'Tesseract OCR installed',
-  check: () => commandExists('tesseract'),
-  fix: 'Optional: Install tesseract for OCR support',
+  name: 'Approval secret configured (APPROVAL_SECRET or MASTER_KEY 32+)',
+  check: () => resolveApprovalSecret() !== undefined,
+  fix: 'Set APPROVAL_SECRET (a random string) OR a MASTER_KEY of 32+ random characters in .env. Without one, the approval registry is fail-closed and side-effect approvals cannot be issued/verified.',
 });
 
-// Run checks
+// --- LLM provider readiness (availability only, never the key) ----------------
+
+const envOps = createEnvOperators();
+const llmRoles: Array<{ label: string; op: (typeof envOps)['primary'] }> = [
+  { label: 'LLM primary', op: envOps.primary },
+  { label: 'LLM escalation', op: envOps.escalation },
+  { label: 'LLM alternate', op: envOps.alternate },
+];
+for (const { label, op } of llmRoles) {
+  checks.push({
+    name: `${label} (${op.provider}/${op.model})`,
+    check: () => op.available(),
+    fix: `Set the API key for provider "${op.provider}" in .env (e.g. ${op.provider.toUpperCase()}_API_KEY)`,
+    optional: true,
+  });
+}
+
+// --- Search provider readiness (availability only, never the key) -------------
+
+const secretProvider = new EnvSecretProvider();
+const searchOrder = (process.env.SEARCH_PROVIDER_ORDER || 'brave,exa,tavily')
+  .split(',')
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean);
+for (const id of searchOrder) {
+  checks.push({
+    name: `Search provider "${id}"`,
+    check: async () => Boolean(await secretProvider.resolve(`search.${id}`)),
+    fix: `Set SEARCH_${id.toUpperCase()}_API_KEY in .env to enable the "${id}" search provider`,
+    optional: true,
+  });
+}
+
+// --- Run checks --------------------------------------------------------------
+
 console.log(chalk.gray('Running diagnostics...\n'));
 
 let passed = 0;
 let failed = 0;
+let optionalSkipped = 0;
 
-checks.forEach(check => {
-  const result = check.check();
-  const icon = result ? chalk.green('✓') : chalk.red('✗');
-  const status = result ? chalk.green('OK') : chalk.red('FAIL');
+async function run() {
+  for (const check of checks) {
+    let result: boolean;
+    try {
+      result = await check.check();
+    } catch {
+      result = false;
+    }
 
-  console.log(`${icon} ${check.name.padEnd(30)} ${status}`);
+    if (result) {
+      passed++;
+      console.log(`${chalk.green('✓')} ${check.name.padEnd(46)} ${chalk.green('OK')}`);
+      continue;
+    }
 
-  if (!result && check.fix) {
-    console.log(chalk.gray(`  → ${check.fix}`));
+    if (check.optional) {
+      optionalSkipped++;
+      console.log(`${chalk.yellow('○')} ${check.name.padEnd(46)} ${chalk.yellow('OPTIONAL')}`);
+    } else {
+      failed++;
+      console.log(`${chalk.red('✗')} ${check.name.padEnd(46)} ${chalk.red('FAIL')}`);
+    }
+
+    if (check.fix) {
+      console.log(chalk.gray(`  → ${check.fix}`));
+    }
   }
 
-  if (result) passed++;
-  else failed++;
-});
+  console.log('\n' + '='.repeat(60));
+  console.log(`${passed} passed, ${failed} failed, ${optionalSkipped} optional/skipped`);
+  console.log('='.repeat(60) + '\n');
 
-console.log('\n' + '='.repeat(60));
-console.log(`${passed} passed, ${failed} failed`);
-console.log('='.repeat(60) + '\n');
-
-if (failed === 0) {
-  console.log(chalk.green('🎉 All checks passed! System is ready.\n'));
-  console.log(chalk.blue('Try running:'));
-  console.log(chalk.gray('  npm run agent "Navigate to google.com"\n'));
-} else {
-  console.log(chalk.yellow('⚠️  Some checks failed. Please fix the issues above.\n'));
-  process.exit(1);
+  if (failed === 0) {
+    console.log(chalk.green('🎉 All required checks passed! System is ready.\n'));
+    console.log(chalk.blue('Try running:'));
+    console.log(chalk.gray('  npm run smoke:gateway'));
+    console.log(chalk.gray('  npm run agent "Navigate to google.com"'));
+    console.log(chalk.gray('  npm run research "What is the Browser Agent Gateway?" --mode quick\n'));
+  } else {
+    console.log(chalk.yellow('⚠️  Some required checks failed. Please fix the issues above.\n'));
+    process.exit(1);
+  }
 }
+
+run().catch((error) => {
+  console.error(chalk.red('Diagnostic failed:'), error.message);
+  process.exit(1);
+});

@@ -1,5 +1,6 @@
 import * as crypto from 'crypto';
 import { logger } from '../observability/logger.js';
+import { isValidMasterKey } from './secret-resolver.js';
 
 export class SessionEncryption {
   private algorithm = 'aes-256-gcm';
@@ -12,14 +13,17 @@ export class SessionEncryption {
     // Get master key from environment
     const masterKey = process.env.MASTER_KEY;
 
-    if (!masterKey || masterKey.length < 32) {
+    // BLOCKER-I: use the shared trusted resolver, not a raw length check. The
+    // public `.env.example` placeholder (33 chars) must never become a usable
+    // encryption key.
+    if (!isValidMasterKey(masterKey)) {
       throw new Error(
-        'MASTER_KEY must be set in environment and at least 32 characters long'
+        'MASTER_KEY must be a strong random key of at least 32 characters (not a placeholder/default)'
       );
     }
 
     // Derive key from master key
-    this.key = crypto.scryptSync(masterKey, 'salt', this.keyLength);
+    this.key = crypto.scryptSync(masterKey as string, 'salt', this.keyLength);
   }
 
   /**

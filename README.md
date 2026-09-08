@@ -1,656 +1,298 @@
-# 🤖 MCP Playwright Automation
+# 🤖 Browser Agent Gateway
 
-**Sistema de automatización web autónoma con agentes basados en LLMs locales (Costo $0)**
+A locally runnable **Browser Agent Gateway** for Juan's agent ecosystem. It gives coding agents, Interview Nail, Marketing and OrquestadorZao a controlled browser/research capability without depending on the limited Codex built-in browser.
 
-Un sistema completo de automatización web que combina el Model Context Protocol (MCP) con Playwright y LLMs locales para crear un agente autónomo capaz de navegar, interactuar y automatizar tareas en la web usando lenguaje natural.
+> **Obscura-first, Playwright fallback.** Normal machine-driven browser work prefers the low-cost **Obscura** engine. When Obscura is unavailable or a human must take over (login / MFA / CAPTCHA), the gateway deterministically falls back to a persistent **Playwright/Chromium** session.
 
-> **✨ ACTUALIZACIÓN FASE 3 (Nov 2025):**
-> ✅ **5 Intents Pre-Planeados** para LinkedIn (login, profile, search, message, post)
-> ✅ **Session Management** integrado con detección automática de login
-> ✅ **Tracking de Métricas** LLM calls y cache hits en tiempo real
-> ✅ **Análisis de Perfil Mejorado** con detección multilingüe
-> ✅ **100% Tests Pasando** (11/11 unitarios)
-> 📄 Ver [FASE_3_INTEGRACION_FINAL.md](FASE_3_INTEGRACION_FINAL.md) para detalles completos
+## What the gateway provides
+
+- **Obscura-first browsing** — cheap structured DOM/snapshot-first observation through the Obscura engine (configured via `OBSCURA_MCP_COMMAND`).
+- **Playwright fallback** — a compatibility engine that reuses the existing Playwright automation. Also the engine used for human takeover.
+- **Persistent BrowserHost** — browsers stay open across turns. A session is only closed by an explicit close, never on task/turn completion.
+- **Durable authenticated sessions** — encrypted-at-rest browser auth state (AES-256-GCM) via the `SessionVault`, with profile/domain isolation, expiry, validation and revocation.
+- **Deep Research** — quick / standard / deep evidence-backed research through a provider-neutral `SearchProviderRouter` + Browser Gateway + Evidence Ledger, with bounded budgets.
+- **Stable MCP + CLI surface** — the same application logic is exposed over both transports (no duplicated business logic).
+- **Observability** — every task emits structured telemetry (engine, model/provider, fallback count/reason, duration, screenshot count, cost).
 
 ---
 
-## 📦 Instalación Completa
+## Prerequisites
 
-### Prerrequisitos
-- **Node.js** >= 20.0.0 ([Descargar aquí](https://nodejs.org/))
-- **16GB RAM** (mínimo 8GB para pruebas)
-- **25GB espacio en disco** (para modelos LLM)
-- **Git** para clonar el repositorio
+- **Node.js >= 20** ([nodejs.org](https://nodejs.org/))
+- **Playwright chromium browser** — `npx playwright install chromium`
+- **Obscura** (optional) — set `OBSCURA_MCP_COMMAND` to enable the primary engine. Without it, the gateway uses the Playwright fallback (still fully usable).
+- **MASTER_KEY** — a 32+ character random string. Required for durable encrypted sessions (`SessionVault`). Also used to derive the approval-registry subkey when `APPROVAL_SECRET` is not set.
+- **APPROVAL_SECRET** (recommended) — a random string used to sign approval tokens. If not set, the approval registry derives a dedicated subkey from `MASTER_KEY` (HKDF). **There is no default secret**: without `APPROVAL_SECRET` or a valid `MASTER_KEY` (32+ chars), the approval registry is fail-closed and side-effect approvals cannot be issued or verified.
+- **LLM provider API keys** (optional) — `DEEPSEEK_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY` for browser-operator LLM routing.
+- **Search provider API keys** (optional) — `SEARCH_BRAVE_API_KEY`, `SEARCH_EXA_API_KEY`, `SEARCH_TAVILY_API_KEY` for Deep Research. Offline smoke uses a fake provider, so no key is required to try research.
 
-### Paso 1: Clonar el Repositorio
+---
+
+## Install & setup
+
 ```bash
-git clone https://github.com/tu-usuario/mcp_playwright.git
-cd mcp_playwright
-```
-
-### Paso 2: Instalar Dependencias
-```bash
+# 1. Install dependencies
 npm install
-```
 
-Este comando:
-- ✅ Instala todas las dependencias de Node.js
-- ✅ Ejecuta el post-install script automáticamente
-- ✅ Crea directorios necesarios (data/, logs/, etc.)
-- ✅ Instala Playwright y navegadores
+# 2. Configure environment
+cp .env.example .env
+#   - Set MASTER_KEY to a 32+ char random string
+#   - Optionally set APPROVAL_SECRET (a random string) to sign approval tokens
+#   - Optionally set OBSCURA_MCP_COMMAND and provider API keys
 
-### Paso 3: Configuración Inicial
-```bash
-npm run init
-```
+# 3. Install the Playwright chromium browser
+npx playwright install chromium
 
-Este comando:
-- ✅ Crea el archivo `.env` con una MASTER_KEY segura
-- ✅ Configura variables de entorno
-- ✅ Prepara directorios de datos
+# 4. Compile TypeScript
+npm run build
 
-**Archivo `.env` generado:**
-```bash
-# Configuración de seguridad
-MASTER_KEY=<clave-generada-automáticamente>
-
-# Entorno
-NODE_ENV=development
-
-# LLM Endpoints (opcional, usa valores por defecto)
-OLLAMA_ENDPOINT=http://localhost:11434
-QWEN_ENDPOINT=http://localhost:8000
-
-# Logs
-LOG_LEVEL=info
-```
-
-### Paso 4: Instalar Modelos LLM Locales
-```bash
-npm run setup
-```
-
-Este comando instala (puede tardar 20-30 minutos):
-- ✅ **Ollama** - Runtime para modelos locales
-- ✅ **Qwen2.5-Coder 7B** (4GB) - LLM principal para tareas
-- ✅ **DeepSeek-Coder 6.7B** (3.8GB) - Fallback para tareas complejas
-- ✅ **CodeLlama 7B** (3.8GB) - Segundo fallback
-- ✅ **Tesseract OCR** - Para extracción de texto de imágenes
-
-**Opcional:** Para visión avanzada (requiere GPU recomendada):
-```bash
-ollama pull llava:7b  # 4.7GB
-```
-
-### Paso 5: Verificar Instalación
-```bash
+# 5. Verify readiness
 npm run diagnose
 ```
 
-**Salida esperada:**
-```
-🔍 MCP Playwright - System Diagnostic
-
-✅ Node.js version: v20.x.x
-✅ npm installed
-✅ Directories created
-✅ .env file exists
-✅ Ollama service running
-✅ Qwen model available
-✅ DeepSeek model available
-✅ Playwright installed
-✅ Tesseract OCR available
-
-🎉 All checks passed! System ready to use.
-```
-
-### Paso 6: Compilar TypeScript
-```bash
-npm run build
-```
-
-✅ **¡Instalación completada!** El sistema está listo para usar.
+`npm run diagnose` reports the readiness of Obscura, Playwright, LLM/search providers and the secret/session infrastructure — **without leaking any secret values**.
 
 ---
 
-## 🚀 Guía de Uso Rápido
+## MCP tools
 
-### Opción 1: Modo Agente (Lenguaje Natural)
+The gateway is exposed as MCP tools (all prefixed `gateway_`). These are thin transport adapters over the same application logic.
 
-**Ejecutar tareas con instrucciones en texto:**
+### Sessions & execution
 
-```bash
-# Ejemplo básico: Navegar y hacer screenshot
-npm run agent "Navega a google.com y toma un screenshot"
+| Tool | Purpose |
+| --- | --- |
+| `gateway_create_session` | Create (or fetch) an isolated browser gateway session. |
+| `gateway_health` | Report gateway and engine health/capabilities. |
+| `gateway_execute` | Execute a browser task (Obscura first, Playwright fallback, safety + SSRF enforced). |
+| `gateway_close_session` | Close an isolated browser gateway session. |
 
-# Ejemplo con formulario
-npm run agent "Entra a ejemplo.com/contacto y completa el formulario con nombre: Juan, email: juan@email.com"
+### Persistent BrowserHost / human-in-the-loop
 
-# Ejemplo con búsqueda
-npm run agent "Busca en Google 'mejores laptops 2024' y dame los primeros 5 resultados"
-```
+| Tool | Purpose |
+| --- | --- |
+| `gateway_host_create_session` | Create a persistent BrowserHost session (browser stays open across turns). |
+| `gateway_suspend_for_user` | Suspend a session for a human (login/MFA/CAPTCHA). Browser stays open; returns a resumable checkpoint. |
+| `gateway_resume` | Resume a suspended session from its checkpoint (reconstructed continuity — see note below). |
+| `gateway_list_waiting` | List sessions currently waiting for a human. |
+| `gateway_session_status` | Report the status of a BrowserHost session. |
+| `gateway_host_close_session` | Explicitly close a persistent BrowserHost session (always wins). |
 
-**Caso de uso real: LinkedIn**
-```bash
-# Paso 1: Guardar sesión de login (solo una vez)
-npm run agent "Navega a linkedin.com, haz login y guarda la sesión como 'linkedin'"
+### Durable authenticated sessions (SessionVault)
 
-# Paso 2: Usar la sesión guardada
-npm run agent "Restaura la sesión 'linkedin', busca empleos de desarrollador Python remoto y aplica a los primeros 3"
-```
+| Tool | Purpose |
+| --- | --- |
+| `gateway_session_register_profile` | Register a `SessionProfile` (allowed domains, permissions, approval policy). |
+| `gateway_session_bootstrap` | Bootstrap a durable authenticated session. Returns a typed outcome (`healthy` \| `bootstrap_required` \| `user_interaction_required`). |
+| `gateway_session_validate` | Validate a persisted session. Returns a typed outcome (`healthy` \| `reauthentication_required` \| `bootstrap_required` \| `revoked`). |
+| `gateway_session_revoke` | Revoke a persisted session, making it unusable. |
+| `gateway_vault_status` | Report safe SessionVault metadata (status, domains, timestamps, artifactRef). Never returns raw auth state. |
 
-**Con datos de Excel:**
-```bash
-# Crear Excel en data/form-data/clientes.xlsx con columnas:
-# nombre | email | telefono | empresa
+### Deep Research
 
-# Ejecutar
-npm run agent "Completa el formulario en formulario.com/registro con los datos de clientes.xlsx, procesa todas las filas"
-```
-
-### Opción 2: Modo Record (Grabar Acciones)
-
-**Graba tus acciones manualmente y reutilízalas:**
-
-```bash
-# 1. Iniciar grabación
-npm run record https://ejemplo.com --name mi-workflow
-
-# 2. Se abre el navegador con Playwright Inspector
-# 3. Realiza las acciones manualmente (clicks, relleno de formularios, etc.)
-# 4. Cierra el navegador cuando termines
-
-# 5. La grabación se guarda en: recordings/manual/mi-workflow.spec.ts
-```
-
-### Opción 3: Modo Replay (Reproducir Grabaciones)
-
-**Ejecuta grabaciones guardadas:**
-
-```bash
-# Reproducir una grabación
-npm run replay recordings/manual/mi-workflow.spec.ts
-
-# Reproducir con datos diferentes
-npm run replay recordings/manual/form.spec.ts --data data/form-data/nuevos-clientes.xlsx
-```
-
-### Gestión de Sesiones
-
-**Guardar sesiones de login para reutilizar:**
-
-```bash
-# Guardar sesión actual
-npm run agent "Guarda la sesión actual como 'mi-sitio'"
-
-# Listar sesiones guardadas
-npm run agent "Lista todas las sesiones guardadas"
-
-# Restaurar sesión
-npm run agent "Restaura la sesión 'mi-sitio'"
-
-# Eliminar sesión
-npm run agent "Elimina la sesión 'mi-sitio'"
-```
+| Tool | Purpose |
+| --- | --- |
+| `gateway_research` | Run quick/standard/deep web research through SearchProviderRouter + Browser Gateway + Evidence Ledger. Bounded budgets enforced deterministically. |
 
 ---
 
-## 📋 Comandos Disponibles
+## CLI commands
 
-### Comandos Principales
+The same capabilities are available from the command line (all prefixed `gateway:`).
+
+### Persistent BrowserHost / human-in-the-loop
+
 ```bash
-npm run agent "<instrucción>"     # Modo agente autónomo
-npm run record <url>              # Grabar workflow manualmente
-npm run replay <archivo>          # Reproducir grabación
+npm run dev -- gateway:host-create <sessionId> [--headed]
+npm run dev -- gateway:suspend <sessionId> <reason> [--activity <id>] [--instructions <text>]
+npm run dev -- gateway:resume <sessionId> <checkpointId>
+npm run dev -- gateway:waiting
+npm run dev -- gateway:status <sessionId>
+npm run dev -- gateway:host-close <sessionId>
 ```
 
-### Comandos de Configuración
+### Durable authenticated sessions
+
 ```bash
-npm run init                      # Configuración inicial
-npm run setup                     # Instalar modelos LLM
-npm run diagnose                  # Verificar sistema
-npm run build                     # Compilar TypeScript
+npm run dev -- gateway:session-register <profileId> [--domains a.com,b.com] [--interactive] [--max-age <ms>]
+npm run dev -- gateway:session-bootstrap <profileId> <engine>        # engine: playwright|obscura
+npm run dev -- gateway:session-validate <profileId> <engine>
+npm run dev -- gateway:session-revoke <profileId> <engine>
+npm run dev -- gateway:session-status <profileId> <engine>
 ```
 
-### Comandos de Desarrollo
+### Deep Research
+
 ```bash
-npm run dev                       # Modo desarrollo con watch
-npm run test                      # Ejecutar tests
-npm run typecheck                 # Verificar tipos TypeScript
+npm run dev -- research "<question>" [--mode quick|standard|deep] [--session <id>] [--max-search <n>]
 ```
 
-### Docker (Producción)
-```bash
-# Iniciar todo el stack
-docker-compose up -d
-
-# Ver logs
-docker-compose logs -f mcp-playwright
-
-# Detener
-docker-compose down
-```
+> The `npm run dev` script runs the console client with `tsx watch`. You can also invoke the compiled client directly with `npm start -- <command> ...`.
 
 ---
 
-## 💡 Ejemplos de Uso Completos
+## Example flows
 
-### Ejemplo 1: Automatizar Aplicaciones a LinkedIn
+### Public browse (Obscura-first, Playwright fallback)
 
 ```bash
-# 1. Primera vez: Guardar sesión de LinkedIn
-npm run agent "Navega a linkedin.com, haz login con mis credenciales y guarda la sesión como 'linkedin-auth'"
-
-# 2. Crear archivo Excel con datos del CV
-# data/form-data/mi-cv.xlsx:
-# nombre      | telefono  | experiencia | skills
-# Juan Pérez  | 555-0001  | 5 años     | Python, React, AWS
-
-# 3. Aplicar a empleos automáticamente
-npm run agent "Restaura sesión 'linkedin-auth', busca empleos de 'Senior Developer' con Easy Apply, aplica a los primeros 5 usando datos de mi-cv.xlsx"
+npm run smoke:gateway
 ```
 
-### Ejemplo 2: Rellenar Formularios Masivamente
+This creates a session, reports health, navigates to `https://example.com` (falling back to Playwright when Obscura isn't configured), prints the execution telemetry, and runs an offline quick-research smoke.
+
+### Forced fallback
+
+When `OBSCURA_MCP_COMMAND` is unset, the gateway deterministically falls back to Playwright exactly once and records the reason in telemetry (`fallbackCount: 1`, `fallbackReason: provider_unavailable`). The smoke script demonstrates this path.
+
+### Auth bootstrap
 
 ```bash
-# 1. Grabar el proceso una vez
-npm run record https://formulario.com/registro --name registro-clientes
+# Register a profile for a protected site
+npm run dev -- gateway:session-register linkedin --domains linkedin.com --interactive
 
-# 2. Preparar datos en Excel
-# data/form-data/clientes.xlsx con 100 filas
+# Bootstrap a durable session (returns a typed outcome)
+npm run dev -- gateway:session-bootstrap linkedin playwright
+#   → healthy | bootstrap_required | user_interaction_required
 
-# 3. Procesar todas las filas
-npm run agent "Usa la grabación registro-clientes.spec.ts con datos de clientes.xlsx, completa el formulario para cada fila"
+# Validate / revoke later
+npm run dev -- gateway:session-validate linkedin playwright
+npm run dev -- gateway:session-revoke linkedin playwright
 ```
 
-### Ejemplo 3: Web Scraping e Investigación
+### Session status / reuse
 
 ```bash
-# Extraer datos de productos
-npm run agent "Busca en amazon.com 'laptop dell', extrae nombre, precio y rating de los primeros 20 resultados, guárdalos en data/results/laptops.xlsx"
+npm run dev -- gateway:status <sessionId>          # live BrowserHost session
+npm run dev -- gateway:session-status <profileId> <engine>   # persisted auth metadata
+```
 
-# Monitorear precios
-npm run agent "Revisa el precio del producto en amazon.com/dp/B08X123, si es menor a $500 mándame una notificación"
+### Wait / resume (human takeover)
+
+```bash
+# 1. Create a headed persistent session
+npm run dev -- gateway:host-create my-task --headed
+
+# 2. Suspend for a human (login/MFA/CAPTCHA). Browser stays open.
+npm run dev -- gateway:suspend my-task "login required" --instructions "Sign in manually"
+
+# 3. List waiting sessions
+npm run dev -- gateway:waiting
+
+# 4. Resume from the checkpoint (reconstructed continuity — see note below)
+npm run dev -- gateway:resume my-task <checkpointId>
+```
+
+> **Note on headless → headed takeover (reconstructed continuity):** when a session is promoted from headless to headed for a human takeover, the gateway does **not** guarantee the literal same `Page`/process survives. It captures the useful page URL + auth state, closes the headless browser, reopens headed, and restores the URL + storage. This is **reconstructed continuity** — the same logical task/session continues, but it is a new browser/context. For critical authenticated workflows that will need human takeover, start the session headed from the beginning.
+
+### Research quick / standard / deep
+
+```bash
+npm run dev -- research "What is the Browser Agent Gateway?" --mode quick
+npm run dev -- research "Compare Playwright and Obscura for browser automation" --mode standard
+npm run dev -- research "Deep dive: SSRF protections in browser automation" --mode deep
 ```
 
 ---
 
-## ✨ Características Principales
+## Approval flow (side effects & raw clicks)
 
-### 🎯 **Modos de Operación**
+A raw `click` and any irreversible external side effect (`submit`, `send`, `publish`) are **never** auto-executed. A bare `approval: { approved: true }` on a task is **not** trusted and is always rejected — a hostile agent could self-approve any side effect. Instead, the gateway uses a **trusted, one-time human approval workflow**:
 
-1. **Modo Agente** - Instrucciones en lenguaje natural
+```text
+approval_required -> pending approval -> trusted human/operator approval
+  -> one-time token -> execute the exact approved action once
+```
+
+1. **Task is blocked.** `gateway_execute` returns `status: "blocked"`, `category: "approval_required"`, and a `pendingId` (the pending approval created for the exact task/session/action/target).
+2. **Operator lists pending approvals** (local control-plane, not exposed to MCP callers):
    ```bash
-   npm run agent "Navega a LinkedIn y aplica a 3 empleos de Python"
+   npm run dev -- gateway:approval-pending
    ```
-
-2. **Modo Record** - Graba tus acciones manualmente
+3. **Trusted human/operator approves** the exact pending request and receives a **one-time token**:
    ```bash
-   npm run record https://example.com
+   npm run dev -- gateway:approve <pendingId>
+   # prints: One-time token: { "approvalId": "...", "signature": "..." }
    ```
-
-3. **Modo Replay** - Reproduce grabaciones
-   ```bash
-   npm run replay recordings/my-workflow.spec.ts
+   The token is bound to the exact `taskId`/`sessionId`/`actionType`/`target`, expires after a TTL, and can be revoked. It is **one-time** — replaying it is rejected.
+4. **Retry the exact action** with the token:
+   ```json
+   {
+     "taskId": "...",
+     "sessionId": "...",
+     "action": { "type": "click", "target": "#delete-account" },
+     "approval": { "approved": true, "approvalId": "<approvalId>", "signature": "<signature>" }
+   }
    ```
+   The action executes **exactly once**. The same token cannot approve a different target/task/session, and cannot be replayed.
 
-### 💰 **100% Gratuito**
+> **Security:** the `approve` step is only reachable through the local operator CLI (`gateway:approve`). The MCP `gateway_execute` surface only *verifies* tokens — an untrusted MCP caller can never self-approve. A pending request that was **not** approved by the operator can never verify, even if the caller computes/injects a valid HMAC signature.
 
-- ✅ LLMs locales (Qwen, DeepSeek, CodeLlama)
-- ✅ Vision local (LLaVA, Tesseract OCR)
-- ✅ Sin APIs pagas
-- ✅ Sin límites de uso
-- ✅ Privacidad total (todo local)
+> **Secret requirement:** approval tokens are HMAC-signed with `APPROVAL_SECRET` (or a subkey HKDF-derived from `MASTER_KEY`). There is **no default secret** — if neither is configured, the approval registry is fail-closed and approvals cannot be issued or verified. Run `npm run diagnose` to confirm readiness.
 
-### 🧠 **Inteligencia**
+### Safe navigation: use `follow_link`, not raw `click`
 
-- ✅ Razonamiento autónomo (observe → think → act)
-- ✅ Auto-corrección de errores
-- ✅ Aprendizaje de patrones
-- ✅ Cache inteligente (reduce 90% llamadas LLM)
-- ✅ Fallback multi-LLM (Qwen → DeepSeek → CodeLlama)
-
-### 📊 **Datos y Automatización**
-
-- ✅ Lee datos de Excel/CSV/TXT/Markdown
-- ✅ Auto-rellena formularios desde datos
-- ✅ Mapeo inteligente de campos
-- ✅ Procesa múltiples filas en batch
-
-### 🛡️ **Robusto**
-
-- ✅ Retry automático con backoff exponencial
-- ✅ Circuit breaker para servicios
-- ✅ Graceful degradation
-- ✅ Encriptación de sesiones
-- ✅ Anti-detección (comportamiento humano)
-- ✅ Rate limiting por sitio
-
-### 📈 **Observabilidad**
-
-- ✅ Logging estructurado (Winston)
-- ✅ Métricas en tiempo real
-- ✅ Dashboard de consola
-- ✅ Videos y screenshots de ejecuciones
-- ✅ Tracing completo
-
-## 🚀 Instalación Rápida
-
-### Prerrequisitos
-
-- Node.js >= 20.0.0
-- 16GB RAM (mínimo 8GB)
-- 25GB espacio en disco
-
-### 1. Clonar repositorio
-
-```bash
-git clone <repo-url>
-cd mcp_playwright
-```
-
-### 2. Instalar dependencias
-
-```bash
-npm install
-```
-
-### 3. Configurar variables de entorno
-
-```bash
-cp .env.example .env
-# Editar .env y configurar MASTER_KEY (32+ caracteres)
-```
-
-### 4. Instalar modelos locales
-
-```bash
-npm run setup
-```
-
-Este script instalará:
-- Ollama
-- qwen2.5-coder:7b (4GB)
-- deepseek-coder:6.7b (3.8GB)
-- codellama:7b (3.8GB)
-- llava:7b (4.7GB) - opcional
-- Tesseract OCR
-
-### 5. Verificar instalación
-
-```bash
-npm run verify-models
-```
-
-## 📖 Uso
-
-### Modo Agente (Lenguaje Natural)
-
-```bash
-# Ejemplo 1: LinkedIn
-npm run agent "Entra a LinkedIn, busca empleos de desarrollador Python remoto y aplica a los primeros 3"
-
-# Ejemplo 2: Formulario con datos de Excel
-npm run agent "Completa el formulario en signup.com con datos de data/form-data/clientes.xlsx"
-
-# Ejemplo 3: Investigación
-npm run agent "Investiga los precios de laptops Dell en Amazon y guárdalos en Excel"
-```
-
-### Modo Record
-
-```bash
-# Iniciar grabación
-npm run record https://example.com
-
-# Haces las acciones manualmente en el navegador
-# Al terminar, se genera: recordings/manual/ejemplo.spec.ts
-```
-
-### Modo Replay
-
-```bash
-# Reproducir grabación
-npm run replay recordings/manual/ejemplo.spec.ts
-
-# Con datos diferentes
-npm run replay recordings/manual/form-fill.spec.ts --data data/form-data/clientes.xlsx
-```
-
-### Consola Interactiva
-
-```bash
-npm run console
-
-# Interface interactiva con comandos:
-# - Ejecutar tareas
-# - Ver métricas en vivo
-# - Gestionar sesiones
-# - Ver historial
-```
-
-## ⚙️ Configuración
-
-### LLMs (config/llm-config.json)
+Because a raw `click` can fire a page's `onclick` JavaScript (which may perform an irreversible action even on a link that *looks* like navigation), raw clicks are always approval-required. For **safe, reversible navigation**, use the dedicated semantic action `follow_link`, which resolves a link's `href` and navigates **without** firing the element's `onclick` JS:
 
 ```json
-{
-  "llms": [
-    {
-      "name": "qwen",
-      "priority": 1,
-      "schedule": "always"  // Usar siempre
-    },
-    {
-      "name": "deepseek",
-      "priority": 2,
-      "schedule": {
-        "allowed": [{"start": "22:00", "end": "06:00"}]  // Solo de noche
-      }
-    }
-  ]
-}
+{ "type": "follow_link", "href": "https://example.com/about" }
 ```
 
-### Control Horario
+`follow_link` is read-only/reversible and auto-allowed (subject to the SSRF/private-network policy). Prefer it over `click` whenever you only need to follow a link.
 
-El sistema usa modelos ligeros de día y modelos pesados de noche:
+---
 
-- **Día (6am-10pm)**: Solo Qwen (ligero, no traba tu máquina)
-- **Noche (10pm-6am)**: Todos los modelos disponibles
+## Troubleshooting typed outcomes
 
-### Límites de Recursos (config/resource-limits.json)
+The gateway returns **typed outcomes** you can branch on. Here is what each means and what to do.
 
-```json
-{
-  "daytime": {
-    "maxCpuPercent": 50,
-    "maxRamGB": 6,
-    "allowedModels": ["qwen"]
-  },
-  "nighttime": {
-    "maxCpuPercent": 90,
-    "maxRamGB": 16,
-    "allowedModels": ["qwen", "deepseek", "codellama"]
-  }
-}
-```
+| Outcome | Meaning | What to do |
+| --- | --- | --- |
+| `bootstrap_required` | No persisted authenticated session exists for this profile/engine. | Run `gateway:session-bootstrap` (or `gateway_session_bootstrap`). |
+| `reauthentication_required` | The persisted session is expired or the live browser was lost. | Re-authenticate: suspend for a human and resume, or re-bootstrap. |
+| `user_interaction_required` | A human must intervene (login/MFA/CAPTCHA). | Use the wait/resume flow (`gateway:suspend` → human acts → `gateway:resume`). |
+| `manual_escalation_required` | Both controlled engines could not complete the task. | The task needs manual handling; the gateway never pretends the Codex browser was invoked. |
+| `security_blocked` | Navigation was denied by the network/SSRF policy (e.g. private/loopback target). | Use a public `http(s)` URL, or explicitly allow private network if appropriate. |
+| `approval_required` | An irreversible external side-effect (or any raw `click`) requires human approval. | Use the real approval flow below — a bare `approval: { approved: true }` is **never** sufficient. |
 
-## 📂 Estructura del Proyecto
+---
+
+## Security notes
+
+- **Secrets are never logged.** API keys, cookies, auth headers, form values and browser-state artifacts are redacted from logs and tool results.
+- **SSRF denied by default.** Private/loopback/link-local targets are blocked at the trusted navigation policy level, regardless of engine.
+- **Session isolation.** Browser/auth state for one session is never shared with another unless an explicit future policy authorizes it.
+- **Approval gates.** Irreversible external actions (submit, send, publish) require explicit approval and cannot be bypassed by switching engines/models/providers.
+- **Page content is untrusted.** A hostile page cannot expand tool permissions, request secrets, change routing or approve side effects.
+- **Durable auth is encrypted at rest** (AES-256-GCM) and only opaque `artifactRef` values are returned to callers — never raw auth state.
+
+---
+
+## Project structure
 
 ```
 mcp_playwright/
-├── mcp-server/           # Servidor MCP con tools Playwright
-├── agent/                # Motor del agente autónomo (futuro)
-├── console-client/       # Cliente CLI (futuro)
-├── lib/                  # Librerías compartidas
-│   ├── resilience/      # Retry, circuit breaker
-│   ├── security/        # Encriptación, sanitización
-│   ├── observability/   # Logging, métricas
-│   └── utils/           # Utilidades
-├── config/              # Archivos de configuración
-├── data/                # Datos y sesiones
-│   ├── sessions/        # Sesiones guardadas (encriptadas)
-│   ├── form-data/       # Datos para formularios
-│   ├── videos/          # Videos de ejecuciones
-│   └── screenshots/     # Screenshots
-├── recordings/          # Grabaciones (Playwright tests)
-│   ├── manual/          # Grabaciones manuales
-│   └── agent-generated/ # Generadas por el agente
-└── scripts/             # Scripts de utilidad
+├── mcp-server/           # MCP server (gateway_* tools + legacy playwright_* tools)
+├── console-client/       # CLI (gateway:* commands, research, agent, record, replay)
+├── lib/browser-gateway/  # Gateway domain/application/infrastructure
+│   ├── domain/           # Contracts: engine, task, result, session, vault
+│   ├── application/      # BrowserGateway, BrowserHost, ResearchAgent, routers, policies
+│   └── infrastructure/   # Obscura/Playwright engines, SessionVault, secret/search providers
+├── scripts/              # diagnose, gateway-smoke, setup helpers
+├── tests/unit/           # Unit tests (incl. browser-gateway/)
+└── docs/                 # Architecture, security, user stories
 ```
 
-## 🎯 Casos de Uso
-
-### 1. Aplicar a Empleos en LinkedIn
+## Development
 
 ```bash
-# 1. Guardar sesión de LinkedIn (una vez)
-npm run auth:save linkedin
-
-# 2. Preparar datos en Excel
-# data/form-data/cv-datos.xlsx:
-# | nombre      | telefono  | cv_path           |
-# | Juan Pérez  | 555-0001  | /data/cv-juan.pdf |
-
-# 3. Ejecutar
-npm run agent --session linkedin "Aplica a 5 empleos de Python con Easy Apply usando cv-datos.xlsx"
+npm run typecheck          # TypeScript type check
+npm run test:unit          # Unit tests
+npm run build              # Compile TypeScript
+npm run diagnose           # Readiness diagnostics
+npm run smoke:gateway      # Repeatable gateway smoke
 ```
 
-### 2. Rellenar Formularios Masivamente
+## License
 
-```bash
-# 1. Grabar el workflow una vez
-npm run record https://formulario.com
-
-# 2. Procesar 100 registros desde Excel
-npm run agent "Usa la grabación form-fill.spec.ts con datos de clientes.xlsx y procesa todas las filas"
-```
-
-### 3. Investigación y Extracción de Datos
-
-```bash
-npm run agent "Investiga los 20 laptops más baratos en Amazon, extrae nombre, precio y specs, guárdalos en data/results/laptops.xlsx"
-```
-
-## 🔧 Comandos Útiles
-
-```bash
-# Desarrollo
-npm run dev                    # Modo desarrollo con watch
-npm run build                  # Compilar TypeScript
-npm run typecheck              # Verificar tipos
-
-# Testing
-npm run test                   # Todos los tests
-npm run test:unit              # Tests unitarios
-npm run test:integration       # Tests de integración
-
-# Mantenimiento
-npm run backup:create          # Crear backup
-npm run backup:restore <file>  # Restaurar backup
-npm run monitor                # Monitorear recursos
-npm run stats                  # Ver estadísticas
-```
-
-## 🛡️ Seguridad
-
-### Sesiones Encriptadas
-
-Todas las sesiones (cookies, localStorage) se guardan encriptadas con AES-256-GCM:
-
-```bash
-# Las sesiones se guardan automáticamente encriptadas
-# Requiere MASTER_KEY en .env (32+ caracteres)
-```
-
-### Sanitización de Inputs
-
-Todos los inputs se sanitizan para prevenir:
-- XSS
-- Command injection
-- SQL injection
-- Path traversal
-
-### Rate Limiting
-
-El sistema respeta rate limits por sitio para evitar baneos:
-
-```json
-{
-  "linkedin.com": { "maxActionsPerHour": 10 },
-  "amazon.com": { "maxActionsPerHour": 20 }
-}
-```
-
-## 📊 Monitoreo
-
-### Dashboard de Métricas
-
-```bash
-npm run monitor
-
-# Output:
-# ╔═══════════════════════════════════════════╗
-# ║         📊 METRICS DASHBOARD             ║
-# ╠═══════════════════════════════════════════╣
-# ║ Tasks Completed:    47                    ║
-# ║ Success Rate:       95.2%                 ║
-# ║ Cache Hit Rate:     89.3%                 ║
-# ║ LLM: qwen                                 ║
-# ║ Cost: $0.00                               ║
-# ╚═══════════════════════════════════════════╝
-```
-
-### Logs
-
-Los logs se guardan en `logs/`:
-- `combined.log` - Todos los logs
-- `error.log` - Solo errores
-
-## ⚠️ Limitaciones y Consideraciones
-
-### Legales
-
-- ✅ Uso personal: Generalmente OK
-- ⚠️ Web scraping: Verifica ToS del sitio
-- ❌ Spam/abuse: Prohibido
-
-### Técnicas
-
-- Algunos sitios detectan bots (el sistema incluye anti-detección)
-- CAPTCHAs pueden requerir intervención manual
-- Rate limits varían por sitio
-
-## 🤝 Contribuir
-
-Contribuciones son bienvenidas! Por favor:
-
-1. Fork el repositorio
-2. Crea una rama para tu feature
-3. Haz tus cambios
-4. Agrega tests
-5. Envía un Pull Request
-
-## 📄 Licencia
-
-MIT License - Ver [LICENSE](LICENSE) para detalles
-
-## 🙏 Créditos
-
-- [Playwright](https://playwright.dev/) - Automatización web
-- [Model Context Protocol](https://modelcontextprotocol.io/) - Por Anthropic
-- [Ollama](https://ollama.ai/) - LLMs locales
-- [Qwen](https://github.com/QwenLM/Qwen) - Por Alibaba Cloud
-- [DeepSeek](https://www.deepseek.com/) - DeepSeek AI
-- [LLaVA](https://llava-vl.github.io/) - Vision local
-
-## 📞 Soporte
-
-- 🐛 Issues: [GitHub Issues](https://github.com/...)
-- 💬 Discusiones: [GitHub Discussions](https://github.com/...)
-- 📧 Email: support@...
-
----
-
-**⭐ Si te gusta este proyecto, dale una estrella en GitHub!**
+MIT — see [LICENSE](LICENSE).
