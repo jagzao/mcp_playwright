@@ -205,6 +205,8 @@ Juan: busca trabajo
 
 The browser must not close while Juan is authenticating.
 
+_2026-09-07 architecture note (registration only, no implementation):_ **Browser Gateway is now the official shared web capability** for navigation, LinkedIn/job boards, company sites, web research and authenticated workflows. Interview Nail remains the source of truth for CV, preferences, exclusions, application history and career decisions; it sends only the minimal context via the integration contract and **does not duplicate** cookie/credential/login/MFA/approval/browser-lifecycle handling. Gateway must stay capable of: Obscura/Playwright transparently; `WAITING_FOR_USER` + resume on "continúa"; persistent authenticated sessions; `approval_required` for side effects; typed errors/fallbacks; and correlation/telemetry with Interview Nail. Implementation pending the specific integration US.
+
 ## 10. Marketing target workflow
 
 Marketing remains source of truth for clients/campaigns/posts and should prefer official platform APIs for writes when stable APIs exist.
