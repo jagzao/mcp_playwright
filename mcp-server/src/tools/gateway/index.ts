@@ -1,6 +1,7 @@
 import { createGateway } from '../../../../lib/browser-gateway/infrastructure/gateway-factory.js';
 import { createBrowserHost } from '../../../../lib/browser-gateway/infrastructure/gateway-factory.js';
 import { createSessionVault } from '../../../../lib/browser-gateway/infrastructure/gateway-factory.js';
+import { restoreAuthenticatedSession } from '../../../../lib/browser-gateway/infrastructure/gateway-factory.js';
 import type { BrowserTask } from '../../../../lib/browser-gateway/domain/browser-task.js';
 import type { BrowserGatewayResult } from '../../../../lib/browser-gateway/domain/browser-result.js';
 import type { SessionVault, SessionProfile } from '../../../../lib/browser-gateway/domain/session-vault.js';
@@ -420,6 +421,48 @@ export const gatewayTools: any[] = [
       const metadata = await vault.getStatus(args.profileId, args.engine);
       if (!metadata) return { success: false, reason: 'no persisted session' };
       return { success: true, metadata };
+    },
+  },
+
+  {
+    name: 'gateway_session_restore',
+    description:
+      'Restore an authenticated session for a profileId from the vault artifact into a NEW Playwright runtime. Returns ONLY the typed outcome + safe metadata (never raw cookies). If the outcome is bootstrap_required / reauthentication_required / user_interaction_required, trigger the WAITING_FOR_USER headed login flow via gateway_session_bootstrap',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        profileId: { type: 'string', description: 'Registered profileId to restore' },
+        engine: { type: 'string', enum: ['playwright', 'obscura'], default: 'playwright' },
+        headed: { type: 'boolean', description: 'Launch a visible browser' },
+      },
+      required: ['profileId'],
+    },
+    async execute(args: any) {
+      const result = await restoreAuthenticatedSession(args.profileId, {
+        engine: args.engine ?? 'playwright',
+        headed: args.headed,
+      });
+      if (result.outcome === 'healthy') {
+        return {
+          success: true,
+          outcome: result.outcome,
+          sessionId: result.sessionId,
+          profileId: result.profileId,
+          engine: result.engine,
+          domains: result.domains,
+          artifactRef: result.artifactRef,
+        };
+      }
+      const message =
+        result.outcome === 'bootstrap_required' || result.outcome === 'reauthentication_required' || result.outcome === 'user_interaction_required'
+          ? `Run gateway_session_bootstrap (profileId=${args.profileId}) to trigger the WAITING_FOR_USER headed login flow.`
+          : undefined;
+      return {
+        success: false,
+        outcome: result.outcome,
+        reason: result.reason,
+        ...(message ? { message } : {}),
+      };
     },
   },
 

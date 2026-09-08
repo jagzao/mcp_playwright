@@ -9,8 +9,10 @@ import { PlaywrightBrowserRuntime } from './engines/playwright/playwright-browse
 import { createEnvOperators } from './llm/env-operators.js';
 import { FileSessionVault } from './session-vault.js';
 import { SessionVaultPersistAuth } from './session-vault-persist-auth.js';
+import { SessionVaultRestoreAuth, type RestoreAuthResult } from './session-vault-restore-auth.js';
 import { isValidMasterKey } from '../../security/secret-resolver.js';
 import type { SessionVault } from '../domain/session-vault.js';
+import type { BrowserEngineId } from '../domain/browser-result.js';
 /**
  * Factory that wires a ready-to-use gateway from configuration. Transport
  * layers (MCP, CLI) consume this so business logic is not duplicated.
@@ -99,6 +101,62 @@ export function createBrowserHost(
     }
   }
   return new BrowserHost(options);
+}
+
+/**
+ * Wire the RESTORE direction of the SessionVault to a Playwright runtime —
+ * the mirror of `createBrowserHost`'s persist wiring. Returns the bridge, or
+ * undefined if no vault is available (MASTER_KEY not configured).
+ *
+ * The default `profileForSession` mapping maps a sessionId that matches a
+ * registered profileId to itself. Callers may inject a richer mapping.
+ */
+export function createSessionRestoreAuth(
+  overrides?: {
+    runtime?: import('./engines/playwright/playwright-browser-runtime.js').PlaywrightBrowserRuntime;
+    profileForSession?: (sessionId: string) => string | undefined;
+    masterKey?: string;
+  },
+): SessionVaultRestoreAuth | undefined {
+  const runtime = overrides?.runtime ?? new PlaywrightBrowserRuntime();
+  const vault = createSessionVault(overrides?.masterKey);
+  if (!vault) return undefined;
+  const profileForSession =
+    overrides?.profileForSession ??
+    ((sessionId: string) => (vault.getProfile(sessionId) ? sessionId : undefined));
+  return new SessionVaultRestoreAuth(vault, runtime, profileForSession);
+}
+
+/**
+ * Convenience productive path for future consumers (e.g. Interview Nail): request
+ * an authenticated session by `profileId` and have it restored automatically
+ * from the vault artifact, or receive a typed outcome telling the caller to
+ * trigger the WAITING_FOR_USER login flow.
+ *
+ * Creates a FRESH vault + runtime each call so the restore always comes from the
+ * durable artifact, never an in-memory variable. Returns only the typed outcome
+ * + safe metadata — never raw auth state.
+ */
+export async function restoreAuthenticatedSession(
+  profileId: string,
+  opts?: { engine?: BrowserEngineId; headed?: boolean; masterKey?: string },
+): Promise<RestoreAuthResult> {
+  const engine = opts?.engine ?? 'playwright';
+  if (engine !== 'playwright') {
+    return {
+      outcome: 'reauthentication_required',
+      reason: `restore currently supports the 'playwright' runtime only (requested: ${engine})`,
+    };
+  }
+  const runtime = new PlaywrightBrowserRuntime();
+  const vault = createSessionVault(opts?.masterKey);
+  if (!vault) {
+    return { outcome: 'bootstrap_required', reason: 'SessionVault unavailable (MASTER_KEY not configured)' };
+  }
+  const bridge = new SessionVaultRestoreAuth(vault, runtime, (sid) =>
+    vault.getProfile(sid) ? sid : undefined,
+  );
+  return bridge.restoreAuth(profileId, { headed: opts?.headed });
 }
 
 /**

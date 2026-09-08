@@ -9,6 +9,7 @@ import { logger } from '../../lib/observability/logger.js';
 import { createBrowserHost } from '../../lib/browser-gateway/infrastructure/gateway-factory.js';
 import { createSessionVault } from '../../lib/browser-gateway/infrastructure/gateway-factory.js';
 import { createApprovalRegistry } from '../../lib/browser-gateway/infrastructure/gateway-factory.js';
+import { createSessionRestoreAuth } from '../../lib/browser-gateway/infrastructure/gateway-factory.js';
 import chalk from 'chalk';
 
 const program = new Command();
@@ -350,6 +351,30 @@ program
     console.log('createdAt:', new Date(metadata.createdAt).toISOString());
     console.log('lastValidatedAt:', new Date(metadata.lastValidatedAt).toISOString());
     console.log('artifactRef:', metadata.artifactRef);
+  });
+
+program
+  .command('gateway:session-restore <profileId> <engine>')
+  .description('Restore an authenticated session from the vault artifact into a NEW Playwright runtime (engine: playwright). Prints only the typed outcome + safe metadata — never raw cookies')
+  .option('--headed', 'Launch a visible browser')
+  .action(async (profileId, engine, options) => {
+    const bridge = createSessionRestoreAuth();
+    if (!bridge) {
+      console.error(chalk.red('SessionVault unavailable: MASTER_KEY not configured.'));
+      process.exit(1);
+    }
+    const result = await bridge.restoreAuth(profileId, { headed: options.headed });
+    console.log(chalk.green('Outcome:'), result.outcome);
+    if (result.outcome === 'healthy') {
+      console.log('profileId:', result.profileId, '| engine:', result.engine);
+      console.log('domains:', result.domains.join(', '));
+      console.log('artifactRef:', result.artifactRef);
+    } else if ('reason' in result && result.reason) {
+      console.log(chalk.gray('Reason:'), result.reason);
+      console.log(
+        chalk.yellow('Run `gateway:session-bootstrap <profileId> <engine>` to trigger the WAITING_FOR_USER headed login flow.'),
+      );
+    }
   });
 
 // --- Deep Research quick/standard/deep CLI (US-003) ---------------------------
