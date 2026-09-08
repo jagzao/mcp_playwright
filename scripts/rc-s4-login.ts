@@ -70,8 +70,8 @@ async function main() {
     console.log('>>> When you are logged in and on your feed, create the marker file:');
     console.log('>>>   New-Item -ItemType File -Path data/s4-login-done.marker');
     console.log('>>> This process will then capture+persist+validate automatically.');
-    // Poll for the marker (up to 10 min), keeping the browser open.
-    const deadline = Date.now() + 10 * 60 * 1000;
+    // Poll for the marker (up to 30 min), keeping the browser open.
+    const deadline = Date.now() + 30 * 60 * 1000;
     while (Date.now() < deadline) {
       if (existsSync(MARKER)) {
         rmSync(MARKER, { force: true });
