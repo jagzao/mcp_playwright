@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypto';
+import { isValidMasterKey } from './secret-resolver.js';
 
 export class SecretsManager {
   private algorithm = 'aes-256-gcm';
@@ -6,8 +7,11 @@ export class SecretsManager {
   private key: Buffer;
 
   constructor(masterKey: string) {
-    if (!masterKey || masterKey.length < 32) {
-      throw new Error('Master key must be at least 32 characters');
+    // BLOCKER-I: reject known placeholders/weak keys via the shared resolver, not
+    // just a raw length check. The public `.env.example` placeholder must never
+    // become a usable encryption key.
+    if (!isValidMasterKey(masterKey)) {
+      throw new Error('Master key must be a strong random key of at least 32 characters (not a placeholder/default)');
     }
     // Derive a key from the master key
     this.key = scryptSync(masterKey, 'salt', this.keyLength);

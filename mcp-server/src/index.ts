@@ -6,10 +6,12 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { logger } from '../../lib/observability/logger.js';
+import { redactObject } from '../../lib/security/redaction.js';
 import { playwrightTools } from './tools/playwright/index.js';
 import { visionTools } from './tools/vision/index.js';
 import { dataTools } from './tools/data/index.js';
 import { sessionTools } from './tools/session/index.js';
+import { gatewayTools } from './tools/gateway/index.js';
 
 const server = new Server(
   {
@@ -29,6 +31,7 @@ const allTools = [
   ...visionTools,
   ...dataTools,
   ...sessionTools,
+  ...gatewayTools,
 ];
 
 // List available tools
@@ -52,7 +55,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 
   try {
-    logger.info('Tool called', { tool: toolName, args: request.params.arguments });
+    logger.info('Tool called', {
+      tool: toolName,
+      args: redactObject(request.params.arguments || {}),
+    });
     const result = await tool.execute(request.params.arguments || {});
     logger.info('Tool completed', { tool: toolName, success: true });
     return { content: [{ type: 'text', text: JSON.stringify(result) }] };

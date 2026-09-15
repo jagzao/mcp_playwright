@@ -1,0 +1,34 @@
+{
+  "currentFeature": "browser-gateway-mvp",
+  "currentStage": "ready-for-external-audit",
+  "status": "ready-for-external-audit",
+  "source": "docs/user-stories/US-004-browser-gateway-usable-v1.md",
+  "branch": "feat/browser-gateway-mvp",
+  "stages": {
+    "discovery": "done",
+    "spec": "done",
+    "implementation-planning": "done",
+    "implementation": "done",
+    "quality": "done",
+    "independent-review": "done",
+    "final-report": "done",
+    "external-audit": "pending"
+  },
+  "evidence": {
+    "commits": "83cf166..b6abb72",
+    "pr": "https://github.com/jagzao/mcp_playwright/pull/5",
+    "ci": "4/4 green (Test & Build 18.x/20.x, Lint informational, Security Audit real gate)",
+    "unitTests": 277,
+    "integrationApprovalFlowTests": 5,
+    "smoke": "PASS",
+    "auditGate": "npm audit --omit=dev --audit-level=high exit 0 (7 moderate runtime only)",
+    "mcpSdk": "1.30.0 (clears HIGH DNS-rebinding)",
+    "secretResolver": "lib/security/secret-resolver.ts (single source of truth for MASTER_KEY/APPROVAL_SECRET)",
+    "issue4Comment": "https://github.com/jagzao/mcp_playwright/issues/4#issuecomment-5573461654",
+    "pr5Comment": "https://github.com/jagzao/mcp_playwright/pull/5#issuecomment-5574488683",
+    "knownFailures": [
+      "tests/integration/agent-flow.test.ts (legacy AgentOrchestrator Qwen endpoint; pre-existing, unrelated to gateway)",
+      "tests/integration/browser-gateway/browser-host.integration.test.ts (needs headed display/X server; pre-existing, excluded from CI gate)"
+    ]
+  }
+}

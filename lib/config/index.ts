@@ -1,6 +1,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import * as dotenv from 'dotenv';
+import { isValidMasterKey } from '../security/secret-resolver.js';
 
 // Load environment variables
 dotenv.config();
@@ -63,8 +64,8 @@ export const config = {
 export function validateConfig() {
   const errors: string[] = [];
 
-  if (!config.security.masterKey || config.security.masterKey.length < 32) {
-    errors.push('MASTER_KEY must be at least 32 characters. Set it in .env file.');
+  if (!isValidMasterKey(config.security.masterKey)) {
+    errors.push('MASTER_KEY must be a strong random key of at least 32 characters (not a placeholder/default). Set it in .env file.');
   }
 
   if (errors.length > 0) {

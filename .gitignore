@@ -1,6 +1,5 @@
 # Dependencies
 node_modules/
-package-lock.json
 yarn.lock
 pnpm-lock.yaml
 
@@ -23,6 +22,8 @@ npm-debug.log*
 data/sessions/
 data/checkpoints/
 data/agent-memory/
+data/approvals/
+data/browser-sessions/
 backups/
 *.enc
 
